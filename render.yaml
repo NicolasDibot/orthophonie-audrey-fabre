@@ -14,10 +14,5 @@ services:
         generateValue: true
       - key: CORS_ORIGINS
         value: https://nicolasdibot.github.io
-      - key: DATABASE_PATH
-        value: /var/data/audrey.db
-    disk:
-      name: orthophonie-audrey-data
-      mountPath: /var/data
-      sizeGB: 1
-
+      - key: DATABASE_URL
+        sync: false

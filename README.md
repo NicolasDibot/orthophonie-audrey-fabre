@@ -10,7 +10,9 @@ Le front est prévu pour GitHub Pages. Les données modifiables passent par une 
 - Les fichiers et images sont dans `assets/`.
 - Le backend est dans `backend/`.
 - Sans URL d'API dans `config.js`, le site garde un mode local de secours.
-- Avec l'API, les fiches modifiées, commentaires, validations et demandes de rendez-vous sont sauvegardés dans la base SQLite du backend.
+- Avec l'API, les fiches modifiées, commentaires, validations et demandes de rendez-vous sont sauvegardés dans la base du backend.
+- En local, le backend peut utiliser SQLite.
+- En production, le backend utilise Supabase/Postgres via `DATABASE_URL`.
 
 ## Backend local
 
@@ -28,12 +30,12 @@ window.AUDREY_API_BASE_URL = "http://127.0.0.1:8787";
 
 ## Déploiement
 
-Le dépôt contient `render.yaml` pour déployer l'API sur Render avec un disque persistant. Variables importantes :
+Le dépôt contient `render.yaml` pour déployer l'API sur Render sans disque persistant. Variables importantes :
 
 - `ADMIN_USERNAME` : `audrey`
 - `ADMIN_PASSWORD` : mot de passe de connexion admin
 - `SECRET_KEY` : secret de signature des sessions
 - `CORS_ORIGINS` : origine GitHub Pages autorisée
-- `DATABASE_PATH` : chemin de la base SQLite persistante
+- `DATABASE_URL` : chaîne de connexion Supabase/Postgres avec SSL
 
 Après déploiement de l'API, mettre son URL publique dans `config.js`, puis pousser la modification pour que GitHub Pages l'utilise.

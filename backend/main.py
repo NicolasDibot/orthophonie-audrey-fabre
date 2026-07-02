@@ -15,7 +15,14 @@ from typing import Any
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 
+try:
+    import psycopg
+    from psycopg.rows import dict_row
+except ImportError:  # pragma: no cover - only relevant before dependencies are installed.
+    psycopg = None
+    dict_row = None
 
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 DATABASE_PATH = Path(os.getenv("DATABASE_PATH", "audrey.db"))
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "audrey")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "neuro2026")
@@ -40,7 +47,20 @@ def startup() -> None:
     initialize_database()
 
 
-def get_connection() -> sqlite3.Connection:
+def use_postgres() -> bool:
+    return bool(DATABASE_URL)
+
+
+def sql_placeholder() -> str:
+    return "%s" if use_postgres() else "?"
+
+
+def get_connection() -> Any:
+    if use_postgres():
+        if psycopg is None or dict_row is None:
+            raise RuntimeError("psycopg is required when DATABASE_URL is set")
+        return psycopg.connect(DATABASE_URL, row_factory=dict_row)
+
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(DATABASE_PATH)
     connection.row_factory = sqlite3.Row
@@ -63,19 +83,21 @@ def initialize_database() -> None:
         ensure_kv(connection, "appointment_state", create_default_appointment_state())
 
 
-def ensure_kv(connection: sqlite3.Connection, key: str, value: Any) -> None:
-    exists = connection.execute("SELECT 1 FROM kv_store WHERE key = ?", (key,)).fetchone()
+def ensure_kv(connection: Any, key: str, value: Any) -> None:
+    placeholder = sql_placeholder()
+    exists = connection.execute(f"SELECT 1 FROM kv_store WHERE key = {placeholder}", (key,)).fetchone()
     if exists:
         return
 
     connection.execute(
-        "INSERT INTO kv_store (key, value, updated_at) VALUES (?, ?, ?)",
+        f"INSERT INTO kv_store (key, value, updated_at) VALUES ({placeholder}, {placeholder}, {placeholder})",
         (key, json.dumps(value, ensure_ascii=False), utc_now()),
     )
 
 
-def read_kv(connection: sqlite3.Connection, key: str, fallback: Any) -> Any:
-    row = connection.execute("SELECT value FROM kv_store WHERE key = ?", (key,)).fetchone()
+def read_kv(connection: Any, key: str, fallback: Any) -> Any:
+    placeholder = sql_placeholder()
+    row = connection.execute(f"SELECT value FROM kv_store WHERE key = {placeholder}", (key,)).fetchone()
     if not row:
         return fallback
 
@@ -85,11 +107,12 @@ def read_kv(connection: sqlite3.Connection, key: str, fallback: Any) -> Any:
         return fallback
 
 
-def write_kv(connection: sqlite3.Connection, key: str, value: Any) -> None:
+def write_kv(connection: Any, key: str, value: Any) -> None:
+    placeholder = sql_placeholder()
     connection.execute(
-        """
+        f"""
         INSERT INTO kv_store (key, value, updated_at)
-        VALUES (?, ?, ?)
+        VALUES ({placeholder}, {placeholder}, {placeholder})
         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
         """,
         (key, json.dumps(value, ensure_ascii=False), utc_now()),
