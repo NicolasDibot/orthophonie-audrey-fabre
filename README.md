@@ -1,11 +1,39 @@
 # Cabinet d'Orthophonie d'Audrey Fabre
 
-Site statique de ressources et de prise de rendez-vous pour la maquette du Cabinet d'Orthophonie d'Audrey Fabre.
+Site de ressources et de prise de rendez-vous pour le Cabinet d'Orthophonie d'Audrey Fabre.
 
-Le site est prévu pour GitHub Pages et fonctionne directement depuis `index.html`.
+Le front est prévu pour GitHub Pages. Les données modifiables passent par une API FastAPI dès que `config.js` contient l'URL du backend.
 
 ## Notes techniques
 
 - Les contenus de ressources sont dans `data/padlet-data.js`.
 - Les fichiers et images sont dans `assets/`.
-- Les modifications administrateur, commentaires et rendez-vous sont sauvegardés dans le navigateur via `localStorage`.
+- Le backend est dans `backend/`.
+- Sans URL d'API dans `config.js`, le site garde un mode local de secours.
+- Avec l'API, les fiches modifiées, commentaires, validations et demandes de rendez-vous sont sauvegardés dans la base SQLite du backend.
+
+## Backend local
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r backend/requirements.txt
+DATABASE_PATH=backend/audrey-dev.db SECRET_KEY=dev-secret .venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8787
+```
+
+Puis renseigner temporairement dans `config.js` :
+
+```js
+window.AUDREY_API_BASE_URL = "http://127.0.0.1:8787";
+```
+
+## Déploiement
+
+Le dépôt contient `render.yaml` pour déployer l'API sur Render avec un disque persistant. Variables importantes :
+
+- `ADMIN_USERNAME` : `audrey`
+- `ADMIN_PASSWORD` : mot de passe de connexion admin
+- `SECRET_KEY` : secret de signature des sessions
+- `CORS_ORIGINS` : origine GitHub Pages autorisée
+- `DATABASE_PATH` : chemin de la base SQLite persistante
+
+Après déploiement de l'API, mettre son URL publique dans `config.js`, puis pousser la modification pour que GitHub Pages l'utilise.

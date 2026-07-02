@@ -1,5 +1,7 @@
 const importedPadlet = window.PADLET_RESOURCES ?? { resources: [] };
 const baseResources = importedPadlet.resources;
+const apiBaseUrl = String(window.AUDREY_API_BASE_URL ?? "").replace(/\/+$/, "");
+const apiEnabled = Boolean(apiBaseUrl);
 const svgNamespace = "http://www.w3.org/2000/svg";
 const focusableSelector =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), iframe, video, [tabindex]:not([tabindex="-1"])';
@@ -25,7 +27,7 @@ const resourceStorageKey = "audrey-orthophonie-resources-v1";
 const appointmentStorageKey = "audrey-orthophonie-appointments-v1";
 const authStorageKey = "audrey-orthophonie-auth";
 const adminLogin = "audrey";
-const adminPassword = "neuro2026";
+const localAdminPasswordHash = "0e5a170ff0867a879d950b746ab6c1b741cbb413769c35e9647f1e5726a137a4";
 const maxLocalAttachmentBytes = 3 * 1024 * 1024;
 const resourceSections = [
   "Les fonctions cognitives : que sont-elles ?",
@@ -84,7 +86,9 @@ let editableResourceState = loadEditableResourceState();
 let appointmentState = loadAppointmentState();
 let resources = [];
 let resourcesById = {};
-let isAdminLoggedIn = sessionStorage.getItem(authStorageKey) === "true";
+let commentState = {};
+let adminAuthToken = getStoredAdminToken();
+let isAdminLoggedIn = apiEnabled ? Boolean(adminAuthToken) : sessionStorage.getItem(authStorageKey) === "true";
 let activeDiseaseId = getInitialDiseaseId();
 let activeModal = null;
 let activeAdminDialog = null;
@@ -103,11 +107,7 @@ const metricsNode = document.querySelector("#panelMetrics");
 const gridNode = document.querySelector("#resourceGrid");
 let adminControlsNode = null;
 
-refreshResourceIndex();
-renderTabs();
-renderAdminControls();
-renderDisease();
-setupSiteTitleNavigation();
+initializeApp();
 
 window.addEventListener("hashchange", () => {
   const nextId = normalizeDiseaseId(window.location.hash.replace("#", ""));
@@ -135,6 +135,131 @@ document.addEventListener("keydown", (event) => {
     trapFocus(event, activeModal, { includeTabs: true });
   }
 });
+
+async function initializeApp() {
+  await loadBackendState();
+  refreshResourceIndex();
+  renderTabs();
+  renderAdminControls();
+  renderDisease();
+  setupSiteTitleNavigation();
+}
+
+function getStoredAdminToken() {
+  if (!apiEnabled) {
+    return "";
+  }
+
+  const token = sessionStorage.getItem(authStorageKey) || "";
+  return token && token !== "true" ? token : "";
+}
+
+async function loadBackendState(options = {}) {
+  const { silent = false } = options;
+
+  if (!apiEnabled) {
+    return false;
+  }
+
+  try {
+    const state = await apiRequest("/api/state", { auth: true });
+    editableResourceState = normalizeEditableResourceState(state.resourceState);
+    appointmentState = normalizeAppointmentState(state.appointmentState);
+    commentState = normalizeCommentStateMap(state.commentsByResourceId);
+    isAdminLoggedIn = Boolean(state.isAdmin);
+
+    if (!isAdminLoggedIn && adminAuthToken) {
+      adminAuthToken = "";
+      sessionStorage.removeItem(authStorageKey);
+    }
+
+    return true;
+  } catch (error) {
+    if (!silent) {
+      console.error("Impossible de charger les données du backend.", error);
+    }
+
+    adminAuthToken = "";
+    isAdminLoggedIn = false;
+    sessionStorage.removeItem(authStorageKey);
+
+    return false;
+  }
+}
+
+async function refreshFromBackendAndRender(options = {}) {
+  await loadBackendState({ silent: true });
+  refreshResourceIndex();
+  renderAdminControls();
+  renderDisease();
+}
+
+async function apiRequest(path, options = {}) {
+  const { method = "GET", body = null, auth = false } = options;
+  const headers = {};
+
+  if (body !== null) {
+    headers["Content-Type"] = "application/json";
+  }
+
+  if (auth && adminAuthToken) {
+    headers.Authorization = `Bearer ${adminAuthToken}`;
+  }
+
+  const response = await fetch(`${apiBaseUrl}${path}`, {
+    method,
+    headers,
+    body: body === null ? null : JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const error = new Error(`API ${response.status}`);
+    error.status = response.status;
+    throw error;
+  }
+
+  return response.status === 204 ? null : response.json();
+}
+
+function normalizeEditableResourceState(state) {
+  return {
+    overrides: state && typeof state.overrides === "object" ? state.overrides : {},
+    created: Array.isArray(state?.created) ? state.created : [],
+    hidden: Array.isArray(state?.hidden) ? state.hidden : [],
+    deleted: Array.isArray(state?.deleted) ? state.deleted : [],
+  };
+}
+
+function normalizeCommentStateMap(commentsByResourceId) {
+  if (!commentsByResourceId || typeof commentsByResourceId !== "object") {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(commentsByResourceId).map(([resourceId, comments]) => [
+      resourceId,
+      Array.isArray(comments) ? comments.map(normalizeStoredComment).filter(Boolean) : [],
+    ]),
+  );
+}
+
+function cloneJson(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+async function verifyLocalAdminPassword(password) {
+  if (!globalThis.crypto?.subtle) {
+    return false;
+  }
+
+  const encoded = new TextEncoder().encode(password);
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", encoded);
+  const hash = [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+
+  return hash === localAdminPasswordHash;
+}
 
 function setupSiteTitleNavigation() {
   if (!siteTitleNode) {
@@ -217,13 +342,7 @@ function loadEditableResourceState() {
   }
 
   try {
-    const parsed = JSON.parse(raw);
-    return {
-      overrides: parsed && typeof parsed.overrides === "object" ? parsed.overrides : {},
-      created: Array.isArray(parsed?.created) ? parsed.created : [],
-      hidden: Array.isArray(parsed?.hidden) ? parsed.hidden : [],
-      deleted: Array.isArray(parsed?.deleted) ? parsed.deleted : [],
-    };
+    return normalizeEditableResourceState(JSON.parse(raw));
   } catch {
     return fallback;
   }
@@ -854,7 +973,7 @@ function createAvailabilityForm() {
   button.textContent = "Ajouter le créneau";
 
   form.append(date, start, duration, error, button);
-  form.addEventListener("submit", (event) => {
+  form.addEventListener("submit", async (event) => {
     event.preventDefault();
     error.hidden = true;
 
@@ -886,7 +1005,16 @@ function createAvailabilityForm() {
     }
 
     appointmentState.slots.push(slot);
-    saveAppointmentState();
+
+    try {
+      await persistAppointmentState();
+    } catch {
+      appointmentState.slots = appointmentState.slots.filter((item) => item.id !== slot.id);
+      error.hidden = false;
+      error.textContent = "Le créneau n'a pas pu être sauvegardé.";
+      return;
+    }
+
     appointmentNotice = "Le créneau a été ajouté.";
     renderAdminControls();
     renderDisease();
@@ -1059,8 +1187,9 @@ function openAppointmentRequestDialog(slotId) {
 
   const attachmentsHelp = document.createElement("p");
   attachmentsHelp.className = "admin-help";
-  attachmentsHelp.textContent =
-    "Vous pouvez ajouter plusieurs fichiers utiles à la demande. Total maximum pour cette maquette locale : 3 Mo.";
+  attachmentsHelp.textContent = apiEnabled
+    ? "Vous pouvez ajouter plusieurs fichiers utiles à la demande. Total maximum : 3 Mo."
+    : "Vous pouvez ajouter plusieurs fichiers utiles à la demande. Total maximum pour cette maquette locale : 3 Mo.";
 
   const error = document.createElement("p");
   error.className = "admin-error";
@@ -1126,17 +1255,33 @@ function openAppointmentRequestDialog(slotId) {
       createdAt: new Date().toISOString(),
     };
 
-    const previousRequests = [...appointmentState.requests];
-    appointmentState.requests.unshift(request);
+    if (apiEnabled) {
+      try {
+        await apiRequest("/api/appointments/requests", {
+          method: "POST",
+          body: { request },
+        });
+        await loadBackendState({ silent: true });
+      } catch (apiError) {
+        error.hidden = false;
+        error.textContent = apiError.status === 409
+          ? "Ce créneau n'est plus disponible. Choisissez un autre horaire."
+          : "La demande n'a pas pu être envoyée. Réessayez dans un instant.";
+        return;
+      }
+    } else {
+      const previousRequests = [...appointmentState.requests];
+      appointmentState.requests.unshift(request);
 
-    try {
-      saveAppointmentState();
-    } catch {
-      appointmentState.requests = previousRequests;
-      error.hidden = false;
-      error.textContent =
-        "La sauvegarde locale a échoué. Retirez une pièce jointe ou utilisez des fichiers plus légers.";
-      return;
+      try {
+        saveAppointmentState();
+      } catch {
+        appointmentState.requests = previousRequests;
+        error.hidden = false;
+        error.textContent =
+          "La sauvegarde locale a échoué. Retirez une pièce jointe ou utilisez des fichiers plus légers.";
+        return;
+      }
     }
 
     appointmentNotice = "Votre demande a bien été envoyée. Audrey Fabre devra la valider.";
@@ -1182,6 +1327,20 @@ function loadAppointmentState() {
 
 function saveAppointmentState() {
   localStorage.setItem(appointmentStorageKey, JSON.stringify(appointmentState));
+}
+
+async function persistAppointmentState() {
+  if (apiEnabled) {
+    await apiRequest("/api/appointment-state", {
+      method: "PUT",
+      auth: true,
+      body: { appointmentState },
+    });
+    await loadBackendState({ silent: true });
+    return;
+  }
+
+  saveAppointmentState();
 }
 
 function normalizeAppointmentState(state) {
@@ -1367,13 +1526,14 @@ function groupSlotsByDate(slots) {
   return [...groups.entries()];
 }
 
-function approveAppointmentRequest(requestId) {
+async function approveAppointmentRequest(requestId) {
   const request = appointmentState.requests.find((item) => item.id === requestId);
 
   if (!request) {
     return;
   }
 
+  const previousState = cloneJson(appointmentState);
   appointmentState.requests = appointmentState.requests.map((item) => {
     if (item.id === requestId) {
       return { ...item, status: "approved", approvedAt: new Date().toISOString() };
@@ -1387,12 +1547,18 @@ function approveAppointmentRequest(requestId) {
   });
 
   appointmentNotice = "La demande de rendez-vous a été validée.";
-  saveAppointmentState();
+  try {
+    await persistAppointmentState();
+  } catch {
+    appointmentState = previousState;
+    appointmentNotice = "La demande n'a pas pu être validée.";
+  }
   renderAdminControls();
   renderDisease();
 }
 
-function declineAppointmentRequest(requestId) {
+async function declineAppointmentRequest(requestId) {
+  const previousState = cloneJson(appointmentState);
   appointmentState.requests = appointmentState.requests.map((request) =>
     request.id === requestId
       ? { ...request, status: "declined", declinedAt: new Date().toISOString() }
@@ -1400,23 +1566,34 @@ function declineAppointmentRequest(requestId) {
   );
 
   appointmentNotice = "La demande de rendez-vous a été refusée.";
-  saveAppointmentState();
+  try {
+    await persistAppointmentState();
+  } catch {
+    appointmentState = previousState;
+    appointmentNotice = "La demande n'a pas pu être refusée.";
+  }
   renderAdminControls();
   renderDisease();
 }
 
-function toggleAppointmentSlot(slotId) {
+async function toggleAppointmentSlot(slotId) {
+  const previousState = cloneJson(appointmentState);
   appointmentState.slots = appointmentState.slots.map((slot) =>
     slot.id === slotId ? { ...slot, enabled: !slot.enabled } : slot,
   );
 
   appointmentNotice = "La disponibilité a été mise à jour.";
-  saveAppointmentState();
+  try {
+    await persistAppointmentState();
+  } catch {
+    appointmentState = previousState;
+    appointmentNotice = "La disponibilité n'a pas pu être mise à jour.";
+  }
   renderAdminControls();
   renderDisease();
 }
 
-function deleteAppointmentSlot(slotId) {
+async function deleteAppointmentSlot(slotId) {
   const slot = getAppointmentSlotById(slotId);
 
   if (!slot) {
@@ -1428,6 +1605,7 @@ function deleteAppointmentSlot(slotId) {
     return;
   }
 
+  const previousState = cloneJson(appointmentState);
   appointmentState.slots = appointmentState.slots.filter((item) => item.id !== slotId);
   appointmentState.requests = appointmentState.requests.map((request) =>
     request.slotId === slotId && request.status === "pending"
@@ -1436,7 +1614,12 @@ function deleteAppointmentSlot(slotId) {
   );
 
   appointmentNotice = "Le créneau a été supprimé.";
-  saveAppointmentState();
+  try {
+    await persistAppointmentState();
+  } catch {
+    appointmentState = previousState;
+    appointmentNotice = "Le créneau n'a pas pu être supprimé.";
+  }
   renderAdminControls();
   renderDisease();
 }
@@ -1523,21 +1706,40 @@ function openLoginDialog() {
   const actions = createAdminFormActions("Se connecter");
 
   form.append(loginField, passwordField, error, actions);
-  form.addEventListener("submit", (event) => {
+  form.addEventListener("submit", async (event) => {
     event.preventDefault();
 
     const formData = new FormData(form);
     const login = String(formData.get("login") ?? "").trim();
     const password = String(formData.get("password") ?? "");
 
-    if (login !== adminLogin || password !== adminPassword) {
+    if (apiEnabled) {
+      try {
+        const session = await apiRequest("/api/auth/login", {
+          method: "POST",
+          body: { login, password },
+        });
+        adminAuthToken = session.token || "";
+        sessionStorage.setItem(authStorageKey, adminAuthToken);
+        const loaded = await loadBackendState({ silent: true });
+        if (!loaded || !adminAuthToken) {
+          throw new Error("Session invalide");
+        }
+      } catch {
+        error.hidden = false;
+        error.textContent = "Identifiant ou mot de passe incorrect.";
+        return;
+      }
+    } else if (login !== adminLogin || !(await verifyLocalAdminPassword(password))) {
       error.hidden = false;
       error.textContent = "Identifiant ou mot de passe incorrect.";
       return;
     }
 
     isAdminLoggedIn = true;
-    sessionStorage.setItem(authStorageKey, "true");
+    if (!apiEnabled) {
+      sessionStorage.setItem(authStorageKey, "true");
+    }
     resetViewAfterSessionChange();
   });
 
@@ -1546,6 +1748,7 @@ function openLoginDialog() {
 
 function logoutAdmin() {
   isAdminLoggedIn = false;
+  adminAuthToken = "";
   sessionStorage.removeItem(authStorageKey);
   resetViewAfterSessionChange();
 }
@@ -1591,8 +1794,9 @@ function createResourceForm(resource, options = {}) {
 
   const intro = document.createElement("p");
   intro.className = "admin-help";
-  intro.textContent =
-    "Les modifications sont sauvegardées localement sur cet ordinateur pour cette maquette.";
+  intro.textContent = apiEnabled
+    ? "Les modifications sont sauvegardées dans la base du site."
+    : "Les modifications sont sauvegardées localement sur cet ordinateur pour cette maquette.";
 
   const titleField = createFieldLabel("Titre de la fiche", "input", {
     type: "text",
@@ -1661,14 +1865,15 @@ function createResourceForm(resource, options = {}) {
     }
 
     try {
-      saveResourceFromEditor(resource.id, result.resource, { isNew });
+      await saveResourceFromEditor(resource.id, result.resource, { isNew });
     } catch {
       editableResourceState = loadEditableResourceState();
       refreshResourceIndex();
       renderDisease();
       error.hidden = false;
-      error.textContent =
-        "La sauvegarde locale a échoué. Essayez avec un fichier plus léger ou ajoutez un lien à la place.";
+      error.textContent = apiEnabled
+        ? "La sauvegarde en ligne a échoué. Vérifiez la connexion puis réessayez."
+        : "La sauvegarde locale a échoué. Essayez avec un fichier plus léger ou ajoutez un lien à la place.";
       return;
     }
 
@@ -1797,7 +2002,9 @@ function createAttachmentFields(resource, options = {}) {
 
   const help = document.createElement("p");
   help.className = "admin-help";
-  help.textContent = "Les images, PDF, vidéos et documents importés sont sauvegardés dans ce navigateur pour la maquette. Taille maximale : 3 Mo.";
+  help.textContent = apiEnabled
+    ? "Les images, PDF, vidéos et documents importés sont sauvegardés dans la base du site. Taille maximale : 3 Mo."
+    : "Les images, PDF, vidéos et documents importés sont sauvegardés dans ce navigateur pour la maquette. Taille maximale : 3 Mo.";
 
   const modeSelect = modeLabel.querySelector("select");
   const updateAttachmentInputs = () => {
@@ -2120,9 +2327,10 @@ function getAttachmentDisplayName(attachment) {
   return attachment.url || attachment.label || "ressource liée";
 }
 
-function saveResourceFromEditor(originalId, editedResource, options = {}) {
+async function saveResourceFromEditor(originalId, editedResource, options = {}) {
   const { isNew = false } = options;
   const shouldHide = Boolean(editedResource.isHidden);
+  const previousState = cloneJson(editableResourceState);
 
   if (isNew) {
     editableResourceState.created.push(editedResource);
@@ -2135,7 +2343,23 @@ function saveResourceFromEditor(originalId, editedResource, options = {}) {
   }
 
   setResourceHidden(editedResource.id, shouldHide);
-  saveEditableResourceState();
+
+  if (apiEnabled) {
+    try {
+      await apiRequest("/api/resource-state", {
+        method: "PUT",
+        auth: true,
+        body: { resourceState: editableResourceState },
+      });
+      await loadBackendState({ silent: true });
+    } catch (error) {
+      editableResourceState = previousState;
+      throw error;
+    }
+  } else {
+    saveEditableResourceState();
+  }
+
   refreshResourceIndex();
   renderDisease();
 }
@@ -2152,7 +2376,7 @@ function setResourceHidden(resourceId, shouldHide) {
   editableResourceState.hidden = [...hiddenIds];
 }
 
-function requestDeleteResource(resourceId) {
+async function requestDeleteResource(resourceId) {
   const resource = resourcesById[resourceId];
 
   if (!resource) {
@@ -2167,12 +2391,13 @@ function requestDeleteResource(resourceId) {
     return;
   }
 
-  deleteResource(resourceId);
+  await deleteResource(resourceId);
   closeAdminDialog({ restoreFocus: false });
 }
 
-function deleteResource(resourceId) {
+async function deleteResource(resourceId) {
   const isBaseResource = baseResources.some((resource) => resource.id === resourceId);
+  const previousState = cloneJson(editableResourceState);
 
   if (isBaseResource) {
     editableResourceState.deleted = [...new Set([...editableResourceState.deleted, resourceId])];
@@ -2185,8 +2410,29 @@ function deleteResource(resourceId) {
   }
 
   editableResourceState.hidden = editableResourceState.hidden.filter((id) => id !== resourceId);
-  localStorage.removeItem(getStorageKey(resourceId));
-  saveEditableResourceState();
+
+  if (apiEnabled) {
+    try {
+      await apiRequest("/api/resource-state", {
+        method: "PUT",
+        auth: true,
+        body: { resourceState: editableResourceState },
+      });
+      await apiRequest(`/api/comments/${encodeURIComponent(resourceId)}`, {
+        method: "PUT",
+        auth: true,
+        body: { comments: [] },
+      });
+      await loadBackendState({ silent: true });
+    } catch (error) {
+      editableResourceState = previousState;
+      throw error;
+    }
+  } else {
+    localStorage.removeItem(getStorageKey(resourceId));
+    saveEditableResourceState();
+  }
+
   refreshResourceIndex();
   renderAdminControls();
 
@@ -3519,7 +3765,7 @@ function createReplyForm(resourceId, parentId) {
   return form;
 }
 
-function handleCommentSubmit(event) {
+async function handleCommentSubmit(event) {
   event.preventDefault();
 
   const form = event.currentTarget;
@@ -3536,19 +3782,34 @@ function handleCommentSubmit(event) {
   const author = isReply
     ? "Audrey Fabre"
     : String(formData.get("author") ?? "").trim() || (isAdminLoggedIn ? "Audrey Fabre" : "Anonyme");
-  const comments = getComments(resourceId);
   const status = isAdminLoggedIn ? "approved" : "pending";
-
-  comments.unshift({
+  const comment = {
     id: createCommentId(),
     author,
     message,
     createdAt: new Date().toISOString(),
     parentId,
     status,
-  });
+    isReply,
+  };
 
-  saveComments(resourceId, comments);
+  if (apiEnabled) {
+    try {
+      await apiRequest(`/api/comments/${encodeURIComponent(resourceId)}`, {
+        method: "POST",
+        auth: isAdminLoggedIn,
+        body: comment,
+      });
+      await loadBackendState({ silent: true });
+    } catch {
+      return;
+    }
+  } else {
+    const comments = getComments(resourceId);
+    comments.unshift(comment);
+    saveComments(resourceId, comments);
+  }
+
   form.reset();
   renderAdminControls();
   renderDisease();
@@ -3560,20 +3821,43 @@ function handleCommentSubmit(event) {
   });
 }
 
-function approveComment(resourceId, commentId) {
-  const comments = getComments(resourceId).map((comment) =>
-    comment.id === commentId ? { ...comment, status: "approved" } : comment,
-  );
+async function approveComment(resourceId, commentId) {
+  if (apiEnabled) {
+    await apiRequest(
+      `/api/comments/${encodeURIComponent(resourceId)}/${encodeURIComponent(commentId)}/approve`,
+      {
+        method: "POST",
+        auth: true,
+      },
+    );
+    await loadBackendState({ silent: true });
+  } else {
+    const comments = getComments(resourceId).map((comment) =>
+      comment.id === commentId ? { ...comment, status: "approved" } : comment,
+    );
+    saveComments(resourceId, comments);
+  }
 
-  saveComments(resourceId, comments);
   renderAdminControls();
   renderDisease();
   refreshModalComments(resourceId, { open: true });
 }
 
-function deleteComment(resourceId, commentId) {
-  const comments = removeCommentAndReplies(getComments(resourceId), commentId);
-  saveComments(resourceId, comments);
+async function deleteComment(resourceId, commentId) {
+  if (apiEnabled) {
+    await apiRequest(
+      `/api/comments/${encodeURIComponent(resourceId)}/${encodeURIComponent(commentId)}`,
+      {
+        method: "DELETE",
+        auth: true,
+      },
+    );
+    await loadBackendState({ silent: true });
+  } else {
+    const comments = removeCommentAndReplies(getComments(resourceId), commentId);
+    saveComments(resourceId, comments);
+  }
+
   renderAdminControls();
   renderDisease();
   refreshModalComments(resourceId, { open: true });
@@ -3606,6 +3890,10 @@ function refreshModalComments(resourceId, options = {}) {
 }
 
 function getComments(resourceId) {
+  if (apiEnabled) {
+    return commentState[resourceId] ?? [];
+  }
+
   const raw = localStorage.getItem(getStorageKey(resourceId));
 
   if (!raw) {
@@ -3716,6 +4004,11 @@ function normalizeStoredComment(comment) {
 }
 
 function saveComments(resourceId, comments) {
+  if (apiEnabled) {
+    commentState[resourceId] = comments;
+    return;
+  }
+
   localStorage.setItem(getStorageKey(resourceId), JSON.stringify(comments));
 }
 
