@@ -845,8 +845,9 @@ function renderAppointmentPanel() {
   title.textContent = "Prise de rendez-vous";
 
   const text = document.createElement("p");
-  text.textContent =
-    "Choisissez un créneau disponible. La demande sera confirmée après validation par Audrey Fabre.";
+  text.textContent = isAdminLoggedIn
+    ? "Gérez les demandes de rendez-vous et les disponibilités proposées aux patients."
+    : "Choisissez un créneau disponible. La demande sera confirmée après validation par Audrey Fabre.";
 
   header.append(title, text);
 
