@@ -59,7 +59,7 @@ def get_connection() -> Any:
     if use_postgres():
         if psycopg is None or dict_row is None:
             raise RuntimeError("psycopg is required when DATABASE_URL is set")
-        return psycopg.connect(DATABASE_URL, row_factory=dict_row)
+        return psycopg.connect(DATABASE_URL, row_factory=dict_row, prepare_threshold=None)
 
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(DATABASE_PATH)
