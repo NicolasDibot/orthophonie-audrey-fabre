@@ -1564,30 +1564,24 @@ body.modal-open .site-header {
   position: fixed;
   inset: 0 0 auto 0;
   z-index: 1100;
-  min-height: clamp(220px, 28vh, 320px);
+  min-height: 62px;
   align-items: center;
   box-shadow: 0 10px 26px rgba(21, 29, 34, 0.18);
 }
 
 body.modal-open .header-content {
-  padding: 18px clamp(16px, 2vw, 32px) 16px;
+  padding: 9px clamp(14px, 1.6vw, 24px);
 }
 
-body.modal-open .eyebrow {
-  margin-bottom: 8px;
-  font-size: clamp(1.45rem, 2.7vw, 2.25rem);
-  line-height: 1.08;
+body.modal-open .eyebrow,
+body.modal-open .header-copy {
+  display: none;
 }
 
 body.modal-open h1 {
   max-width: none;
-  font-size: clamp(3.25rem, 5.5vw, 5.8rem);
-}
-
-body.modal-open .header-copy {
-  margin-top: 8px;
-  font-size: clamp(1.45rem, 2.7vw, 2.25rem);
-  line-height: 1.08;
+  font-size: clamp(1.35rem, 2vw, 1.9rem);
+  line-height: 1.05;
 }
 
 body.modal-open .disease-menu {
@@ -1597,7 +1591,30 @@ body.modal-open .disease-menu {
   border-radius: 0;
   border-left: 0;
   border-right: 0;
+  min-height: 58px;
+  padding: 7px clamp(10px, 1.4vw, 20px);
+  align-items: center;
+  gap: 12px;
   box-shadow: 0 10px 26px rgba(21, 29, 34, 0.16);
+}
+
+body.modal-open .tabs,
+body.modal-open .admin-controls {
+  gap: 8px;
+}
+
+body.modal-open .tab-button,
+body.modal-open .admin-button {
+  min-height: 42px;
+  padding: 8px 12px;
+  font-size: 0.94rem;
+}
+
+body.modal-open .admin-status,
+body.modal-open .admin-pending-indicator {
+  min-height: 42px;
+  padding: 7px 10px;
+  font-size: 0.94rem;
 }
 
 .resource-card {
