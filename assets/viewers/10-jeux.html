@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Liste de jeux</title>
+    <style>
+      :root {
+        --bg: #f8f9f6;
+        --surface: #ffffff;
+        --ink: #151d22;
+        --muted: #455057;
+        --line: #c6cec7;
+        --langage: #ffd36f;
+        --executif: #8c52ff;
+        --visuo: #25a95d;
+        --attention: #e85cae;
+        --memoire: #38a8e8;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-size: 22px;
+        line-height: 1.45;
+      }
+
+      main {
+        padding: 26px;
+      }
+
+      h1 {
+        margin: 0 0 18px;
+        font-size: clamp(2rem, 4vw, 3.2rem);
+        line-height: 1.08;
+      }
+
+      .intro {
+        max-width: 1100px;
+        margin: 0 0 22px;
+        color: var(--muted);
+        font-size: 1.1rem;
+        font-weight: 750;
+      }
+
+      .table-wrap {
+        overflow-x: auto;
+        border: 2px solid var(--line);
+        border-radius: 8px;
+        background: var(--surface);
+      }
+
+      table {
+        width: 100%;
+        min-width: 1080px;
+        border-collapse: collapse;
+      }
+
+      th,
+      td {
+        border: 2px solid #1f2930;
+        padding: 13px 14px;
+        text-align: center;
+        vertical-align: middle;
+      }
+
+      th {
+        font-size: 1rem;
+        font-weight: 900;
+        line-height: 1.15;
+      }
+
+      tbody th {
+        position: sticky;
+        left: 0;
+        z-index: 1;
+        width: 270px;
+        background: #fff;
+        text-align: left;
+        font-size: 1.06rem;
+      }
+
+      td {
+        min-width: 150px;
+        font-size: 1.45rem;
+        font-weight: 950;
+      }
+
+      .empty {
+        color: #717b82;
+        font-size: 1.1rem;
+        font-weight: 800;
+      }
+
+      .langage {
+        background: var(--langage);
+      }
+
+      .executif {
+        background: var(--executif);
+        color: #fff;
+      }
+
+      .visuo {
+        background: var(--visuo);
+        color: #fff;
+      }
+
+      .attention {
+        background: var(--attention);
+        color: #fff;
+      }
+
+      .memoire {
+        background: var(--memoire);
+      }
+
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+        gap: 14px;
+        margin-top: 24px;
+      }
+
+      .game-card {
+        border: 2px solid var(--line);
+        border-radius: 8px;
+        padding: 18px;
+        background: var(--surface);
+      }
+
+      .game-card h2 {
+        margin: 0 0 14px;
+        font-size: 1.45rem;
+        line-height: 1.12;
+      }
+
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .chip {
+        border: 2px solid #1f2930;
+        border-radius: 8px;
+        padding: 7px 10px;
+        font-size: 0.98rem;
+        font-weight: 900;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Liste de jeux</h1>
+      <p class="intro">Plus il y a de +, plus le jeu sollicite le domaine indiqué.</p>
+
+      <div class="table-wrap" aria-label="Tableau des jeux par domaine cognitif">
+        <table>
+          <thead>
+            <tr>
+              <th>Jeu</th>
+              <th class="langage">LANGAGE</th>
+              <th class="executif">FONCTIONS EXECUTIVES</th>
+              <th class="visuo">VISUO-SPATIAL</th>
+              <th class="attention">ATTENTION</th>
+              <th class="memoire">MEMOIRE</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><th>TABOO</th><td class="langage">+++</td><td class="executif">++</td><td class="visuo empty">—</td><td class="attention">+</td><td class="memoire empty">—</td></tr>
+            <tr><th>PUISSANCE 4</th><td class="langage empty">—</td><td class="executif">++</td><td class="visuo">+++</td><td class="attention">++</td><td class="memoire empty">—</td></tr>
+            <tr><th>1000 BORNES</th><td class="langage empty">—</td><td class="executif">+++</td><td class="visuo empty">—</td><td class="attention">+++</td><td class="memoire">++</td></tr>
+            <tr><th>LYNX</th><td class="langage empty">—</td><td class="executif empty">—</td><td class="visuo">+++</td><td class="attention">+++</td><td class="memoire empty">—</td></tr>
+            <tr><th>MEMORY</th><td class="langage empty">—</td><td class="executif">++</td><td class="visuo">++</td><td class="attention">+++</td><td class="memoire">+++</td></tr>
+            <tr><th>BIZZARRE BAZAR</th><td class="langage empty">—</td><td class="executif">+++</td><td class="visuo">+++</td><td class="attention">++</td><td class="memoire empty">—</td></tr>
+            <tr><th>CACHE TOMATE</th><td class="langage empty">—</td><td class="executif empty">—</td><td class="visuo empty">—</td><td class="attention">++</td><td class="memoire">+++</td></tr>
+            <tr><th>CLUEDO</th><td class="langage">+</td><td class="executif">+++</td><td class="visuo empty">—</td><td class="attention">++</td><td class="memoire">+++</td></tr>
+            <tr><th>BATAILLE NAVALE</th><td class="langage empty">—</td><td class="executif">+++</td><td class="visuo">+++</td><td class="attention empty">—</td><td class="memoire empty">—</td></tr>
+            <tr><th>RUSH HOUR</th><td class="langage empty">—</td><td class="executif">+++</td><td class="visuo">+++</td><td class="attention empty">—</td><td class="memoire empty">—</td></tr>
+            <tr><th>UNO</th><td class="langage empty">—</td><td class="executif">+++</td><td class="visuo">++</td><td class="attention">+</td><td class="memoire empty">—</td></tr>
+            <tr><th>DEUX POMMES TROIS PAINS</th><td class="langage empty">—</td><td class="executif">+++</td><td class="visuo empty">—</td><td class="attention">+++</td><td class="memoire empty">—</td></tr>
+            <tr><th>POULE POULE</th><td class="langage empty">—</td><td class="executif">+++</td><td class="visuo empty">—</td><td class="attention">+++</td><td class="memoire empty">—</td></tr>
+            <tr><th>PETIT BAC</th><td class="langage">+++</td><td class="executif">+</td><td class="visuo empty">—</td><td class="attention empty">—</td><td class="memoire empty">—</td></tr>
+            <tr><th>SPEEDBAC</th><td class="langage">+++</td><td class="executif">+</td><td class="visuo empty">—</td><td class="attention empty">—</td><td class="memoire empty">—</td></tr>
+            <tr><th>JUST ONE</th><td class="langage">+++</td><td class="executif">+++</td><td class="visuo empty">—</td><td class="attention empty">—</td><td class="memoire empty">—</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <section class="cards" aria-label="Résumé lisible par jeu">
+        <article class="game-card"><h2>TABOO</h2><div class="chips"><span class="chip langage">Langage +++</span><span class="chip executif">Fonctions executives ++</span><span class="chip attention">Attention +</span></div></article>
+        <article class="game-card"><h2>PUISSANCE 4</h2><div class="chips"><span class="chip executif">Fonctions executives ++</span><span class="chip visuo">Visuo-spatial +++</span><span class="chip attention">Attention ++</span></div></article>
+        <article class="game-card"><h2>1000 BORNES</h2><div class="chips"><span class="chip executif">Fonctions executives +++</span><span class="chip attention">Attention +++</span><span class="chip memoire">Memoire ++</span></div></article>
+        <article class="game-card"><h2>LYNX</h2><div class="chips"><span class="chip visuo">Visuo-spatial +++</span><span class="chip attention">Attention +++</span></div></article>
+        <article class="game-card"><h2>MEMORY</h2><div class="chips"><span class="chip executif">Fonctions executives ++</span><span class="chip visuo">Visuo-spatial ++</span><span class="chip attention">Attention +++</span><span class="chip memoire">Memoire +++</span></div></article>
+        <article class="game-card"><h2>BIZZARRE BAZAR</h2><div class="chips"><span class="chip executif">Fonctions executives +++</span><span class="chip visuo">Visuo-spatial +++</span><span class="chip attention">Attention ++</span></div></article>
+        <article class="game-card"><h2>CACHE TOMATE</h2><div class="chips"><span class="chip attention">Attention ++</span><span class="chip memoire">Memoire +++</span></div></article>
+        <article class="game-card"><h2>CLUEDO</h2><div class="chips"><span class="chip langage">Langage +</span><span class="chip executif">Fonctions executives +++</span><span class="chip attention">Attention ++</span><span class="chip memoire">Memoire +++</span></div></article>
+        <article class="game-card"><h2>BATAILLE NAVALE</h2><div class="chips"><span class="chip executif">Fonctions executives +++</span><span class="chip visuo">Visuo-spatial +++</span></div></article>
+        <article class="game-card"><h2>RUSH HOUR</h2><div class="chips"><span class="chip executif">Fonctions executives +++</span><span class="chip visuo">Visuo-spatial +++</span></div></article>
+        <article class="game-card"><h2>UNO</h2><div class="chips"><span class="chip executif">Fonctions executives +++</span><span class="chip visuo">Visuo-spatial ++</span><span class="chip attention">Attention +</span></div></article>
+        <article class="game-card"><h2>DEUX POMMES TROIS PAINS</h2><div class="chips"><span class="chip executif">Fonctions executives +++</span><span class="chip attention">Attention +++</span></div></article>
+        <article class="game-card"><h2>POULE POULE</h2><div class="chips"><span class="chip executif">Fonctions executives +++</span><span class="chip attention">Attention +++</span></div></article>
+        <article class="game-card"><h2>PETIT BAC</h2><div class="chips"><span class="chip langage">Langage +++</span><span class="chip executif">Fonctions executives +</span></div></article>
+        <article class="game-card"><h2>SPEEDBAC</h2><div class="chips"><span class="chip langage">Langage +++</span><span class="chip executif">Fonctions executives +</span></div></article>
+        <article class="game-card"><h2>JUST ONE</h2><div class="chips"><span class="chip langage">Langage +++</span><span class="chip executif">Fonctions executives +++</span></div></article>
+      </section>
+    </main>
+  </body>
+</html>
