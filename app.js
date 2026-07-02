@@ -97,6 +97,9 @@ let adminPreviousFocus = null;
 let appointmentNotice = "";
 let resourceSearchQuery = "";
 let activeThemeFilter = "all";
+let loadingIndicatorNode = null;
+let loadingStack = [];
+let loadingSequence = 0;
 
 const tabsNode = document.querySelector("#diseaseTabs");
 const headerNode = document.querySelector(".site-header");
@@ -137,12 +140,18 @@ document.addEventListener("keydown", (event) => {
 });
 
 async function initializeApp() {
-  await loadBackendState();
-  refreshResourceIndex();
-  renderTabs();
-  renderAdminControls();
-  renderDisease();
-  setupSiteTitleNavigation();
+  const stopLoading = apiEnabled ? startLoading("Chargement des données du site...") : () => {};
+
+  try {
+    await loadBackendState();
+    refreshResourceIndex();
+    renderTabs();
+    renderAdminControls();
+    renderDisease();
+    setupSiteTitleNavigation();
+  } finally {
+    stopLoading();
+  }
 }
 
 function getStoredAdminToken() {
@@ -245,6 +254,91 @@ function normalizeCommentStateMap(commentsByResourceId) {
 
 function cloneJson(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+function startLoading(message = "Traitement en cours...") {
+  const id = ++loadingSequence;
+  loadingStack.push({ id, message });
+  renderLoadingIndicator();
+
+  return () => {
+    loadingStack = loadingStack.filter((item) => item.id !== id);
+    renderLoadingIndicator();
+  };
+}
+
+function renderLoadingIndicator() {
+  const indicator = getLoadingIndicator();
+  const active = loadingStack[loadingStack.length - 1];
+
+  if (!active) {
+    indicator.hidden = true;
+    return;
+  }
+
+  indicator.hidden = false;
+  indicator.querySelector(".global-loading-text").textContent = active.message;
+}
+
+function getLoadingIndicator() {
+  if (loadingIndicatorNode) {
+    return loadingIndicatorNode;
+  }
+
+  const indicator = document.createElement("div");
+  indicator.className = "global-loading";
+  indicator.setAttribute("role", "status");
+  indicator.setAttribute("aria-live", "polite");
+  indicator.hidden = true;
+
+  const spinner = document.createElement("span");
+  spinner.className = "global-loading-spinner";
+  spinner.setAttribute("aria-hidden", "true");
+
+  const text = document.createElement("span");
+  text.className = "global-loading-text";
+
+  indicator.append(spinner, text);
+  document.body.append(indicator);
+  loadingIndicatorNode = indicator;
+  return indicator;
+}
+
+function setControlLoading(control, loadingText = "") {
+  if (!(control instanceof HTMLElement)) {
+    return () => {};
+  }
+
+  const originalText = control.textContent;
+  const wasDisabled = control instanceof HTMLButtonElement ? control.disabled : false;
+
+  control.classList.add("is-loading");
+  control.setAttribute("aria-busy", "true");
+
+  if (control instanceof HTMLButtonElement) {
+    control.disabled = true;
+  }
+
+  if (loadingText) {
+    control.textContent = loadingText;
+  }
+
+  return () => {
+    control.classList.remove("is-loading");
+    control.removeAttribute("aria-busy");
+
+    if (control instanceof HTMLButtonElement) {
+      control.disabled = wasDisabled;
+    }
+
+    if (loadingText) {
+      control.textContent = originalText;
+    }
+  };
+}
+
+function setFormLoading(form, loadingText = "") {
+  return setControlLoading(form.querySelector('button[type="submit"]'), loadingText);
 }
 
 async function verifyLocalAdminPassword(password) {
@@ -860,13 +954,13 @@ function createAppointmentRequestItem(request) {
     approve.className = "admin-button admin-button-primary";
     approve.type = "button";
     approve.textContent = "Valider";
-    approve.addEventListener("click", () => approveAppointmentRequest(request.id));
+    approve.addEventListener("click", () => approveAppointmentRequest(request.id, approve));
 
     const decline = document.createElement("button");
     decline.className = "admin-button";
     decline.type = "button";
     decline.textContent = "Refuser";
-    decline.addEventListener("click", () => declineAppointmentRequest(request.id));
+    decline.addEventListener("click", () => declineAppointmentRequest(request.id, decline));
 
     actions.append(approve, decline);
     article.append(actions);
@@ -1005,6 +1099,8 @@ function createAvailabilityForm() {
     }
 
     appointmentState.slots.push(slot);
+    const stopLoading = startLoading("Ajout du créneau...");
+    const stopSubmitLoading = setFormLoading(form, "Ajout...");
 
     try {
       await persistAppointmentState();
@@ -1013,6 +1109,9 @@ function createAvailabilityForm() {
       error.hidden = false;
       error.textContent = "Le créneau n'a pas pu être sauvegardé.";
       return;
+    } finally {
+      stopSubmitLoading();
+      stopLoading();
     }
 
     appointmentNotice = "Le créneau a été ajouté.";
@@ -1045,13 +1144,13 @@ function createAvailabilityItem(slot) {
   toggle.className = "admin-button";
   toggle.type = "button";
   toggle.textContent = slot.enabled ? "Rendre indisponible" : "Rendre disponible";
-  toggle.addEventListener("click", () => toggleAppointmentSlot(slot.id));
+  toggle.addEventListener("click", () => toggleAppointmentSlot(slot.id, toggle));
 
   const remove = document.createElement("button");
   remove.className = "admin-button admin-danger-button";
   remove.type = "button";
   remove.textContent = "Supprimer";
-  remove.addEventListener("click", () => deleteAppointmentSlot(slot.id));
+  remove.addEventListener("click", () => deleteAppointmentSlot(slot.id, remove));
 
   actions.append(toggle, remove);
   item.append(label, status, actions);
@@ -1234,6 +1333,8 @@ function openAppointmentRequestDialog(slotId) {
       return;
     }
 
+    const stopLoading = startLoading("Envoi de la demande de rendez-vous...");
+    const stopSubmitLoading = setFormLoading(form, "Envoi...");
     let requestAttachments = [];
     try {
       requestAttachments = await buildAppointmentAttachments(files);
@@ -1241,6 +1342,9 @@ function openAppointmentRequestDialog(slotId) {
       error.hidden = false;
       error.textContent = "Une pièce jointe n'a pas pu être lue. Essayez un autre fichier.";
       return;
+    } finally {
+      stopSubmitLoading();
+      stopLoading();
     }
 
     const request = {
@@ -1254,6 +1358,8 @@ function openAppointmentRequestDialog(slotId) {
       status: "pending",
       createdAt: new Date().toISOString(),
     };
+    const stopSaveLoading = startLoading("Enregistrement de la demande...");
+    const stopSaveSubmitLoading = setFormLoading(form, "Enregistrement...");
 
     if (apiEnabled) {
       try {
@@ -1268,6 +1374,9 @@ function openAppointmentRequestDialog(slotId) {
           ? "Ce créneau n'est plus disponible. Choisissez un autre horaire."
           : "La demande n'a pas pu être envoyée. Réessayez dans un instant.";
         return;
+      } finally {
+        stopSaveSubmitLoading();
+        stopSaveLoading();
       }
     } else {
       const previousRequests = [...appointmentState.requests];
@@ -1281,6 +1390,9 @@ function openAppointmentRequestDialog(slotId) {
         error.textContent =
           "La sauvegarde locale a échoué. Retirez une pièce jointe ou utilisez des fichiers plus légers.";
         return;
+      } finally {
+        stopSaveSubmitLoading();
+        stopSaveLoading();
       }
     }
 
@@ -1526,13 +1638,15 @@ function groupSlotsByDate(slots) {
   return [...groups.entries()];
 }
 
-async function approveAppointmentRequest(requestId) {
+async function approveAppointmentRequest(requestId, control = null) {
   const request = appointmentState.requests.find((item) => item.id === requestId);
 
   if (!request) {
     return;
   }
 
+  const stopLoading = startLoading("Validation du rendez-vous...");
+  const stopControlLoading = setControlLoading(control, "Validation...");
   const previousState = cloneJson(appointmentState);
   appointmentState.requests = appointmentState.requests.map((item) => {
     if (item.id === requestId) {
@@ -1555,9 +1669,13 @@ async function approveAppointmentRequest(requestId) {
   }
   renderAdminControls();
   renderDisease();
+  stopControlLoading();
+  stopLoading();
 }
 
-async function declineAppointmentRequest(requestId) {
+async function declineAppointmentRequest(requestId, control = null) {
+  const stopLoading = startLoading("Refus du rendez-vous...");
+  const stopControlLoading = setControlLoading(control, "Refus...");
   const previousState = cloneJson(appointmentState);
   appointmentState.requests = appointmentState.requests.map((request) =>
     request.id === requestId
@@ -1574,9 +1692,13 @@ async function declineAppointmentRequest(requestId) {
   }
   renderAdminControls();
   renderDisease();
+  stopControlLoading();
+  stopLoading();
 }
 
-async function toggleAppointmentSlot(slotId) {
+async function toggleAppointmentSlot(slotId, control = null) {
+  const stopLoading = startLoading("Mise à jour de la disponibilité...");
+  const stopControlLoading = setControlLoading(control, "Mise à jour...");
   const previousState = cloneJson(appointmentState);
   appointmentState.slots = appointmentState.slots.map((slot) =>
     slot.id === slotId ? { ...slot, enabled: !slot.enabled } : slot,
@@ -1591,9 +1713,11 @@ async function toggleAppointmentSlot(slotId) {
   }
   renderAdminControls();
   renderDisease();
+  stopControlLoading();
+  stopLoading();
 }
 
-async function deleteAppointmentSlot(slotId) {
+async function deleteAppointmentSlot(slotId, control = null) {
   const slot = getAppointmentSlotById(slotId);
 
   if (!slot) {
@@ -1605,6 +1729,8 @@ async function deleteAppointmentSlot(slotId) {
     return;
   }
 
+  const stopLoading = startLoading("Suppression du créneau...");
+  const stopControlLoading = setControlLoading(control, "Suppression...");
   const previousState = cloneJson(appointmentState);
   appointmentState.slots = appointmentState.slots.filter((item) => item.id !== slotId);
   appointmentState.requests = appointmentState.requests.map((request) =>
@@ -1622,6 +1748,8 @@ async function deleteAppointmentSlot(slotId) {
   }
   renderAdminControls();
   renderDisease();
+  stopControlLoading();
+  stopLoading();
 }
 
 function getSlotStatusLabel(slot) {
@@ -1712,35 +1840,42 @@ function openLoginDialog() {
     const formData = new FormData(form);
     const login = String(formData.get("login") ?? "").trim();
     const password = String(formData.get("password") ?? "");
+    const stopLoading = startLoading("Connexion en cours...");
+    const stopSubmitLoading = setFormLoading(form, "Connexion...");
 
-    if (apiEnabled) {
-      try {
-        const session = await apiRequest("/api/auth/login", {
-          method: "POST",
-          body: { login, password },
-        });
-        adminAuthToken = session.token || "";
-        sessionStorage.setItem(authStorageKey, adminAuthToken);
-        const loaded = await loadBackendState({ silent: true });
-        if (!loaded || !adminAuthToken) {
-          throw new Error("Session invalide");
+    try {
+      if (apiEnabled) {
+        try {
+          const session = await apiRequest("/api/auth/login", {
+            method: "POST",
+            body: { login, password },
+          });
+          adminAuthToken = session.token || "";
+          sessionStorage.setItem(authStorageKey, adminAuthToken);
+          const loaded = await loadBackendState({ silent: true });
+          if (!loaded || !adminAuthToken) {
+            throw new Error("Session invalide");
+          }
+        } catch {
+          error.hidden = false;
+          error.textContent = "Identifiant ou mot de passe incorrect.";
+          return;
         }
-      } catch {
+      } else if (login !== adminLogin || !(await verifyLocalAdminPassword(password))) {
         error.hidden = false;
         error.textContent = "Identifiant ou mot de passe incorrect.";
         return;
       }
-    } else if (login !== adminLogin || !(await verifyLocalAdminPassword(password))) {
-      error.hidden = false;
-      error.textContent = "Identifiant ou mot de passe incorrect.";
-      return;
-    }
 
-    isAdminLoggedIn = true;
-    if (!apiEnabled) {
-      sessionStorage.setItem(authStorageKey, "true");
+      isAdminLoggedIn = true;
+      if (!apiEnabled) {
+        sessionStorage.setItem(authStorageKey, "true");
+      }
+      resetViewAfterSessionChange();
+    } finally {
+      stopSubmitLoading();
+      stopLoading();
     }
-    resetViewAfterSessionChange();
   });
 
   openAdminDialog("Connexion", form);
@@ -1836,7 +1971,7 @@ function createResourceForm(resource, options = {}) {
   error.hidden = true;
 
   const actions = createAdminFormActions(isNew ? "Créer la fiche" : "Enregistrer", {
-    onDelete: isNew ? null : () => requestDeleteResource(resource.id),
+    onDelete: isNew ? null : (event) => requestDeleteResource(resource.id, event.currentTarget),
   });
 
   form.append(
@@ -1856,11 +1991,15 @@ function createResourceForm(resource, options = {}) {
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     error.hidden = true;
+    const stopLoading = startLoading(isNew ? "Création de la fiche..." : "Enregistrement de la fiche...");
+    const stopSubmitLoading = setFormLoading(form, isNew ? "Création..." : "Enregistrement...");
     const result = await readResourceForm(form, resource, { isNew });
 
     if (!result.ok) {
       error.hidden = false;
       error.textContent = result.message;
+      stopSubmitLoading();
+      stopLoading();
       return;
     }
 
@@ -1875,6 +2014,9 @@ function createResourceForm(resource, options = {}) {
         ? "La sauvegarde en ligne a échoué. Vérifiez la connexion puis réessayez."
         : "La sauvegarde locale a échoué. Essayez avec un fichier plus léger ou ajoutez un lien à la place.";
       return;
+    } finally {
+      stopSubmitLoading();
+      stopLoading();
     }
 
     closeAdminDialog();
@@ -2376,7 +2518,7 @@ function setResourceHidden(resourceId, shouldHide) {
   editableResourceState.hidden = [...hiddenIds];
 }
 
-async function requestDeleteResource(resourceId) {
+async function requestDeleteResource(resourceId, control = null) {
   const resource = resourcesById[resourceId];
 
   if (!resource) {
@@ -2391,8 +2533,16 @@ async function requestDeleteResource(resourceId) {
     return;
   }
 
-  await deleteResource(resourceId);
-  closeAdminDialog({ restoreFocus: false });
+  const stopLoading = startLoading("Suppression de la fiche...");
+  const stopControlLoading = setControlLoading(control, "Suppression...");
+
+  try {
+    await deleteResource(resourceId);
+    closeAdminDialog({ restoreFocus: false });
+  } finally {
+    stopControlLoading();
+    stopLoading();
+  }
 }
 
 async function deleteResource(resourceId) {
@@ -3703,7 +3853,7 @@ function createCommentItem(resourceId, comment) {
       approve.className = "approve-comment";
       approve.type = "button";
       approve.textContent = "Valider";
-      approve.addEventListener("click", () => approveComment(resourceId, comment.id));
+      approve.addEventListener("click", () => approveComment(resourceId, comment.id, approve));
       actions.append(approve);
     }
 
@@ -3714,7 +3864,7 @@ function createCommentItem(resourceId, comment) {
       remove.className = "delete-comment";
       remove.type = "button";
       remove.textContent = "Supprimer";
-      remove.addEventListener("click", () => deleteComment(resourceId, comment.id));
+      remove.addEventListener("click", () => deleteComment(resourceId, comment.id, remove));
       actions.append(remove);
     }
 
@@ -3792,75 +3942,100 @@ async function handleCommentSubmit(event) {
     status,
     isReply,
   };
+  const loadingMessage = isReply ? "Envoi de la réponse..." : "Envoi du commentaire...";
+  const buttonMessage = isReply ? "Réponse..." : "Envoi...";
+  const stopLoading = startLoading(loadingMessage);
+  const stopSubmitLoading = setFormLoading(form, buttonMessage);
 
-  if (apiEnabled) {
-    try {
-      await apiRequest(`/api/comments/${encodeURIComponent(resourceId)}`, {
-        method: "POST",
-        auth: isAdminLoggedIn,
-        body: comment,
-      });
-      await loadBackendState({ silent: true });
-    } catch {
-      return;
+  try {
+    if (apiEnabled) {
+      try {
+        await apiRequest(`/api/comments/${encodeURIComponent(resourceId)}`, {
+          method: "POST",
+          auth: isAdminLoggedIn,
+          body: comment,
+        });
+        await loadBackendState({ silent: true });
+      } catch {
+        return;
+      }
+    } else {
+      const comments = getComments(resourceId);
+      comments.unshift(comment);
+      saveComments(resourceId, comments);
     }
-  } else {
-    const comments = getComments(resourceId);
-    comments.unshift(comment);
-    saveComments(resourceId, comments);
-  }
 
-  form.reset();
-  renderAdminControls();
-  renderDisease();
-  refreshModalComments(resourceId, {
-    open: true,
-    notice: status === "pending"
-      ? "Votre commentaire a bien été envoyé. Il apparaîtra après validation."
-      : "",
-  });
+    form.reset();
+    renderAdminControls();
+    renderDisease();
+    refreshModalComments(resourceId, {
+      open: true,
+      notice: status === "pending"
+        ? "Votre commentaire a bien été envoyé. Il apparaîtra après validation."
+        : "",
+    });
+  } finally {
+    stopSubmitLoading();
+    stopLoading();
+  }
 }
 
-async function approveComment(resourceId, commentId) {
-  if (apiEnabled) {
-    await apiRequest(
-      `/api/comments/${encodeURIComponent(resourceId)}/${encodeURIComponent(commentId)}/approve`,
-      {
-        method: "POST",
-        auth: true,
-      },
-    );
-    await loadBackendState({ silent: true });
-  } else {
-    const comments = getComments(resourceId).map((comment) =>
-      comment.id === commentId ? { ...comment, status: "approved" } : comment,
-    );
-    saveComments(resourceId, comments);
-  }
+async function approveComment(resourceId, commentId, control = null) {
+  const stopLoading = startLoading("Validation du commentaire...");
+  const stopControlLoading = setControlLoading(control, "Validation...");
 
-  renderAdminControls();
-  renderDisease();
-  refreshModalComments(resourceId, { open: true });
+  try {
+    if (apiEnabled) {
+      await apiRequest(
+        `/api/comments/${encodeURIComponent(resourceId)}/${encodeURIComponent(commentId)}/approve`,
+        {
+          method: "POST",
+          auth: true,
+        },
+      );
+      await loadBackendState({ silent: true });
+    } else {
+      const comments = getComments(resourceId).map((comment) =>
+        comment.id === commentId ? { ...comment, status: "approved" } : comment,
+      );
+      saveComments(resourceId, comments);
+    }
+
+    renderAdminControls();
+    renderDisease();
+    refreshModalComments(resourceId, { open: true });
+  } finally {
+    stopControlLoading();
+    stopLoading();
+  }
 }
 
-async function deleteComment(resourceId, commentId) {
-  if (apiEnabled) {
-    await apiRequest(
-      `/api/comments/${encodeURIComponent(resourceId)}/${encodeURIComponent(commentId)}`,
-      {
-        method: "DELETE",
-        auth: true,
-      },
-    );
-    await loadBackendState({ silent: true });
-  } else {
-    const comments = removeCommentAndReplies(getComments(resourceId), commentId);
-    saveComments(resourceId, comments);
-  }
+async function deleteComment(resourceId, commentId, control = null) {
+  const stopLoading = startLoading("Suppression du commentaire...");
+  const stopControlLoading = setControlLoading(control, "Suppression...");
 
-  renderAdminControls();
-  renderDisease();
-  refreshModalComments(resourceId, { open: true });
+  try {
+    if (apiEnabled) {
+      await apiRequest(
+        `/api/comments/${encodeURIComponent(resourceId)}/${encodeURIComponent(commentId)}`,
+        {
+          method: "DELETE",
+          auth: true,
+        },
+      );
+      await loadBackendState({ silent: true });
+    } else {
+      const comments = removeCommentAndReplies(getComments(resourceId), commentId);
+      saveComments(resourceId, comments);
+    }
+
+    renderAdminControls();
+    renderDisease();
+    refreshModalComments(resourceId, { open: true });
+  } finally {
+    stopControlLoading();
+    stopLoading();
+  }
 }
 
 function removeCommentAndReplies(comments, commentId) {
