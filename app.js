@@ -727,7 +727,35 @@ function renderHomePanel() {
     section.append(editButton);
   }
 
+  section.append(createHomeVideoSection());
+
   gridNode.replaceChildren(section);
+}
+
+function createHomeVideoSection() {
+  const section = document.createElement("section");
+  section.className = "home-video-section";
+  section.setAttribute("aria-labelledby", "homeVideoTitle");
+
+  const title = document.createElement("h3");
+  title.id = "homeVideoTitle";
+  title.textContent = "Présentation d'Audrey Fabre";
+
+  const timing = document.createElement("p");
+  timing.className = "home-video-timing";
+  timing.textContent = "Extrait de 1 h 04 min 41 s à 1 h 35 min 14 s";
+
+  const player = document.createElement("iframe");
+  player.className = "home-video-player";
+  player.src = "https://www.youtube.com/embed/_7SIYMRzhdY?start=3881&end=5714&rel=0";
+  player.title = "Présentation d'Audrey Fabre à la Journée Nationale de la Maladie de Huntington 2025";
+  player.loading = "lazy";
+  player.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share";
+  player.referrerPolicy = "strict-origin-when-cross-origin";
+  player.allowFullscreen = true;
+
+  section.append(title, timing, player);
+  return section;
 }
 
 function renderContactPanel() {
