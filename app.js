@@ -39,6 +39,7 @@ const adminLogin = "audrey";
 const localAdminPasswordHash = "0e5a170ff0867a879d950b746ab6c1b741cbb413769c35e9647f1e5726a137a4";
 const maxLocalAttachmentBytes = 3 * 1024 * 1024;
 const contactEmail = "audrey.fabre@aphp.fr";
+const newThemeOptionValue = "__new_theme__";
 const defaultSiteContent = {
   homeTitle: "Bienvenue sur L'orthophonie au quotidien",
   homeBody:
@@ -987,11 +988,12 @@ function getFilteredDiseaseResources(resourcesForDisease) {
 }
 
 function createResourceThemeSection(theme, themeResources) {
-  const section = document.createElement("section");
+  const section = document.createElement("details");
   section.className = "resource-theme-section";
+  section.open = Boolean(resourceSearchQuery.trim()) || activeThemeFilter !== "all";
 
-  const header = document.createElement("header");
-  header.className = "resource-theme-header";
+  const header = document.createElement("summary");
+  header.className = "resource-theme-summary";
 
   const title = document.createElement("h2");
   title.textContent = theme;
@@ -1001,11 +1003,11 @@ function createResourceThemeSection(theme, themeResources) {
 
   header.append(title, count);
 
-  const grid = document.createElement("div");
-  grid.className = "resource-theme-grid";
-  grid.append(...themeResources.map((resource) => createResourceCard(resource)));
+  const list = document.createElement("div");
+  list.className = "resource-theme-list";
+  list.append(...themeResources.map((resource) => createResourceCard(resource)));
 
-  section.append(header, grid);
+  section.append(header, list);
   return section;
 }
 
@@ -2171,17 +2173,12 @@ function createResourceForm(resource, options = {}) {
     required: "true",
   });
 
-  const sectionField = createSelectLabel(
-    "Rubrique",
-    "section",
-    resourceSections.map((section) => ({ value: section, label: section })),
-    resource.section,
-  );
+  const sectionField = createThemeFields(resource.section);
 
   const diseasesField = createDiseaseCheckboxes(resource.diseaseIds);
   const visibilityField = createVisibilityFields(resource);
 
-  const summaryField = createFieldLabel("Résumé visible sur la carte", "textarea", {
+  const summaryField = createFieldLabel("Résumé visible sur la ligne", "textarea", {
     name: "summary",
     rows: "4",
     placeholder: "Texte court affiché sur la page principale...",
@@ -2254,6 +2251,59 @@ function createResourceForm(resource, options = {}) {
   });
 
   return form;
+}
+
+function createThemeFields(selectedTheme) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "theme-editor-fields";
+
+  const themes = getAvailableResourceSections(selectedTheme);
+  const themeField = createSelectLabel(
+    "Thème",
+    "section",
+    [
+      ...themes.map((theme) => ({ value: theme, label: theme })),
+      { value: newThemeOptionValue, label: "Créer un nouveau thème..." },
+    ],
+    selectedTheme,
+  );
+
+  const newThemeField = createFieldLabel("Nom du nouveau thème", "input", {
+    type: "text",
+    name: "newSection",
+    maxlength: "120",
+    placeholder: "Ex. Communication avec les aidants",
+  });
+  newThemeField.classList.add("new-theme-field");
+
+  const select = themeField.querySelector("select");
+  const input = newThemeField.querySelector("input");
+  const updateNewThemeField = () => {
+    const createsTheme = select.value === newThemeOptionValue;
+    newThemeField.hidden = !createsTheme;
+    input.required = createsTheme;
+    if (createsTheme) {
+      window.requestAnimationFrame(() => input.focus());
+    }
+  };
+
+  select.addEventListener("change", updateNewThemeField);
+  updateNewThemeField();
+  wrapper.append(themeField, newThemeField);
+  return wrapper;
+}
+
+function getAvailableResourceSections(currentTheme = "") {
+  const themes = new Set(resourceSections);
+  resources.forEach((resource) => {
+    if (resource.section) {
+      themes.add(resource.section);
+    }
+  });
+  if (currentTheme) {
+    themes.add(currentTheme);
+  }
+  return [...themes].sort(compareResourceThemes);
 }
 
 function createVisibilityFields(resource) {
@@ -2488,7 +2538,11 @@ async function readResourceForm(form, originalResource, options = {}) {
   const { isNew = false } = options;
   const formData = new FormData(form);
   const title = String(formData.get("title") ?? "").trim();
-  const section = String(formData.get("section") ?? "").trim();
+  const selectedSection = String(formData.get("section") ?? "").trim();
+  const requestedNewSection = String(formData.get("newSection") ?? "").trim();
+  const section = selectedSection === newThemeOptionValue
+    ? getCanonicalThemeName(requestedNewSection)
+    : selectedSection;
   const diseaseIds = formData.getAll("diseaseIds").map(String);
   const attachmentMode = String(formData.get("attachmentMode") ?? "none");
   const attachmentUrl = String(formData.get("attachmentUrl") ?? "").trim();
@@ -2503,7 +2557,7 @@ async function readResourceForm(form, originalResource, options = {}) {
   }
 
   if (!section) {
-    return { ok: false, message: "La rubrique est obligatoire." };
+    return { ok: false, message: "Le thème est obligatoire." };
   }
 
   if (diseaseIds.length === 0) {
@@ -2583,6 +2637,14 @@ async function readResourceForm(form, originalResource, options = {}) {
       isHidden,
     }),
   };
+}
+
+function getCanonicalThemeName(themeName) {
+  const normalizedName = normalizeText(themeName);
+  const existingTheme = getAvailableResourceSections().find(
+    (theme) => normalizeText(theme) === normalizedName,
+  );
+  return existingTheme || themeName;
 }
 
 async function buildEditedAttachment(originalResource, mode, url, file, title) {
@@ -2939,6 +3001,9 @@ function createResourceCard(resource) {
   const main = document.createElement("div");
   main.className = "resource-main";
 
+  const content = document.createElement("div");
+  content.className = "resource-card-content";
+
   const topline = document.createElement("div");
   topline.className = "resource-topline";
 
@@ -2958,23 +3023,24 @@ function createResourceCard(resource) {
     topline.append(hiddenBadge);
   }
 
-  main.append(topline);
+  content.append(topline);
 
+  let media;
   if (hasCustomIllustration) {
-    main.append(createMediaPreview(resource, illustrationPreviewUrl));
+    media = createMediaPreview(resource, illustrationPreviewUrl);
   } else if (hasImagePreview) {
-    main.append(createMediaPreview(resource));
+    media = createMediaPreview(resource);
   } else if (hasThumbnailPreview) {
-    main.append(createMediaPreview(resource, youtubeThumbnailUrl));
+    media = createMediaPreview(resource, youtubeThumbnailUrl);
   } else {
-    main.append(createMediaPreview(resource, generatedPreviewUrl));
+    media = createMediaPreview(resource, generatedPreviewUrl);
   }
 
   if (resource.summary) {
     const summary = document.createElement("p");
     summary.className = "resource-summary";
     summary.textContent = resource.summary;
-    main.append(summary);
+    content.append(summary);
   }
 
   const hint = document.createElement("p");
@@ -3009,8 +3075,9 @@ function createResourceCard(resource) {
     footer.append(editButton);
   }
 
-  main.append(footer);
+  content.append(footer);
 
+  main.append(media, content);
   card.append(main);
   card.addEventListener("click", () => openResourceModal(resource.id));
   card.addEventListener("keydown", (event) => {
