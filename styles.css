@@ -1650,19 +1650,14 @@ body.modal-open .header-copy {
 
 .contact-email {
   display: inline-block;
-  margin-top: 12px;
+  margin: 12px 0 0;
   color: var(--teal-dark);
   font-size: clamp(1.2rem, 1.6vw, 1.5rem);
   font-weight: 900;
 }
 
-.contact-email:hover,
-.contact-email:focus-visible {
-  outline: 4px solid rgba(255, 191, 71, 0.72);
-  outline-offset: 3px;
-}
-
 .contact-form {
+  position: relative;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 20px;
@@ -1714,6 +1709,36 @@ body.modal-open .header-copy {
   min-height: 58px;
   padding-inline: 22px;
   font-size: 1.12rem;
+}
+
+.contact-honeypot {
+  position: absolute;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.contact-notice {
+  grid-column: 1 / -1;
+  margin: 0;
+  border-radius: 8px;
+  padding: 14px 16px;
+  font-size: 1.15rem;
+  font-weight: 850;
+  line-height: 1.45;
+}
+
+.contact-notice.is-success {
+  border: 2px solid #35705b;
+  color: #244f40;
+  background: #eaf6f0;
+}
+
+.contact-notice.is-error {
+  border: 2px solid #9b3148;
+  color: #7c2235;
+  background: #fff4f6;
 }
 
 @media (max-width: 700px) {

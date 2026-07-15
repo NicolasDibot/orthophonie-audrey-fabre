@@ -920,10 +920,9 @@ function renderContactPanel() {
   intro.className = "contact-introduction";
   intro.textContent = "Utilisez ce formulaire pour envoyer un courriel à Audrey Fabre.";
 
-  const emailLink = document.createElement("a");
-  emailLink.className = "contact-email";
-  emailLink.href = `mailto:${contactEmail}`;
-  emailLink.textContent = contactEmail;
+  const emailText = document.createElement("p");
+  emailText.className = "contact-email";
+  emailText.textContent = contactEmail;
 
   const form = document.createElement("form");
   form.className = "contact-form";
@@ -951,26 +950,72 @@ function renderContactPanel() {
     required: "true",
   });
 
+  const honeypotField = createFieldLabel("Ne remplissez pas ce champ", "input", {
+    type: "text",
+    name: "website",
+    autocomplete: "off",
+    tabindex: "-1",
+  });
+  honeypotField.className = "contact-honeypot";
+  honeypotField.setAttribute("aria-hidden", "true");
+
+  const notice = document.createElement("p");
+  notice.className = "contact-notice";
+  notice.setAttribute("role", "status");
+  notice.setAttribute("aria-live", "polite");
+  notice.tabIndex = -1;
+  notice.hidden = true;
+
   const submit = document.createElement("button");
   submit.className = "admin-button admin-button-primary contact-submit";
   submit.type = "submit";
   submit.textContent = "Envoyer le courriel";
 
-  form.append(nameField, emailField, subjectField, messageField, submit);
+  form.append(nameField, emailField, subjectField, messageField, honeypotField, notice, submit);
   form.addEventListener("submit", handleContactSubmit);
-  section.append(title, intro, emailLink, form);
+  section.append(title, intro, emailText, form);
   gridNode.replaceChildren(section);
 }
 
-function handleContactSubmit(event) {
+async function handleContactSubmit(event) {
   event.preventDefault();
-  const formData = new FormData(event.currentTarget);
+  const form = event.currentTarget;
+  const formData = new FormData(form);
   const name = String(formData.get("contactName") ?? "").trim();
   const email = String(formData.get("contactEmail") ?? "").trim();
   const subject = String(formData.get("contactSubject") ?? "").trim();
   const message = String(formData.get("contactMessage") ?? "").trim();
-  const body = `Nom : ${name}\nAdresse e-mail : ${email}\n\n${message}`;
-  window.location.href = `mailto:${contactEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  const website = String(formData.get("website") ?? "").trim();
+  const notice = form.querySelector(".contact-notice");
+  const stopLoading = startLoading("Envoi du courriel...");
+  const stopSubmitLoading = setFormLoading(form, "Envoi...");
+  notice.hidden = true;
+
+  try {
+    if (!apiEnabled) {
+      throw new Error("API unavailable");
+    }
+
+    await apiRequest("/api/contact", {
+      method: "POST",
+      body: { name, email, subject, message, website },
+    });
+    form.reset();
+    notice.className = "contact-notice is-success";
+    notice.textContent = "Votre courriel a bien été envoyé à Audrey Fabre.";
+    notice.hidden = false;
+    notice.focus({ preventScroll: true });
+  } catch (error) {
+    notice.className = "contact-notice is-error";
+    notice.textContent = error.status === 429
+      ? "Trop de messages ont été envoyés récemment. Veuillez réessayer dans quelques minutes."
+      : "Le courriel n'a pas pu être envoyé. Vérifiez votre connexion puis réessayez.";
+    notice.hidden = false;
+    notice.focus({ preventScroll: true });
+  } finally {
+    stopSubmitLoading();
+    stopLoading();
+  }
 }
 
 function openHomeEditor() {

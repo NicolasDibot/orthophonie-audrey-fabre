@@ -38,4 +38,16 @@ Le dépôt contient `render.yaml` pour déployer l'API sur Render sans disque pe
 - `CORS_ORIGINS` : origine GitHub Pages autorisée
 - `DATABASE_URL` : chaîne de connexion Supabase/Postgres avec SSL
 
+Le formulaire de contact envoie les courriels depuis le backend. Variables SMTP à ajouter dans Render :
+
+- `SMTP_HOST` : serveur SMTP du fournisseur
+- `SMTP_PORT` : `587` avec STARTTLS ou `465` avec SSL
+- `SMTP_USERNAME` et `SMTP_PASSWORD` : identifiants SMTP privés
+- `SMTP_FROM_EMAIL` : adresse d'expédition autorisée par le fournisseur
+- `CONTACT_TO_EMAIL` : destinataire, `audrey.fabre@aphp.fr`
+- `SMTP_USE_SSL` : `true` uniquement pour le port 465
+- `SMTP_STARTTLS` : `true` pour le port 587
+
+L'adresse saisie dans le formulaire est placée dans `Reply-To`, ce qui permet à Audrey Fabre de répondre directement sans usurper l'adresse de l'expéditeur.
+
 Après déploiement de l'API, mettre son URL publique dans `config.js`, puis pousser la modification pour que GitHub Pages l'utilise.

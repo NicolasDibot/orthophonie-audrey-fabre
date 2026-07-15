@@ -1,14 +1,20 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
+import re
 import sqlite3
+import smtplib
+import ssl
 import time
 import uuid
 from datetime import date, datetime, timedelta
+from email.message import EmailMessage
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +35,19 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "neuro2026")
 SECRET_KEY = os.getenv("SECRET_KEY", "change-this-secret-key")
 TOKEN_TTL_SECONDS = int(os.getenv("TOKEN_TTL_SECONDS", str(12 * 60 * 60)))
 MAX_JSON_BYTES = int(os.getenv("MAX_JSON_BYTES", str(12 * 1024 * 1024)))
+CONTACT_TO_EMAIL = os.getenv("CONTACT_TO_EMAIL", "audrey.fabre@aphp.fr").strip()
+SMTP_HOST = os.getenv("SMTP_HOST", "").strip()
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USERNAME = os.getenv("SMTP_USERNAME", "").strip()
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", SMTP_USERNAME).strip()
+SMTP_USE_SSL = os.getenv("SMTP_USE_SSL", "false").lower() in {"1", "true", "yes"}
+SMTP_STARTTLS = os.getenv("SMTP_STARTTLS", "true").lower() in {"1", "true", "yes"}
+CONTACT_RATE_LIMIT_WINDOW_SECONDS = 15 * 60
+CONTACT_RATE_LIMIT_MAX_REQUESTS = 5
+
+logger = logging.getLogger(__name__)
+contact_rate_limit: dict[str, list[float]] = {}
 
 DEFAULT_RESOURCE_STATE = {"overrides": {}, "created": [], "hidden": [], "deleted": []}
 DEFAULT_SITE_CONTENT = {
@@ -462,9 +481,95 @@ def remove_comment_and_replies(comments: list[dict[str, Any]], comment_id: str) 
     return [comment for comment in comments if comment.get("id") not in ids_to_remove]
 
 
+def normalize_contact_payload(payload: dict[str, Any]) -> dict[str, str]:
+    name = " ".join(str(payload.get("name", "")).split())[:120]
+    email = "".join(str(payload.get("email", "")).split())[:254]
+    subject = " ".join(str(payload.get("subject", "")).split())[:180]
+    message = str(payload.get("message", "")).strip()[:6000]
+
+    if not name or not subject or not message:
+        raise HTTPException(status_code=400, detail="Missing contact information")
+
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        raise HTTPException(status_code=400, detail="Invalid email address")
+
+    return {"name": name, "email": email, "subject": subject, "message": message}
+
+
+def get_contact_request_key(request: Request) -> str:
+    forwarded_for = request.headers.get("x-forwarded-for", "").split(",", maxsplit=1)[0].strip()
+    client_address = forwarded_for or (request.client.host if request.client else "unknown")
+    return hashlib.sha256(f"{SECRET_KEY}:{client_address}".encode()).hexdigest()
+
+
+def enforce_contact_rate_limit(request: Request) -> None:
+    now = time.time()
+    threshold = now - CONTACT_RATE_LIMIT_WINDOW_SECONDS
+    request_key = get_contact_request_key(request)
+    recent_requests = [timestamp for timestamp in contact_rate_limit.get(request_key, []) if timestamp > threshold]
+
+    if len(recent_requests) >= CONTACT_RATE_LIMIT_MAX_REQUESTS:
+        raise HTTPException(status_code=429, detail="Too many contact requests")
+
+    recent_requests.append(now)
+    contact_rate_limit[request_key] = recent_requests
+
+
+def send_contact_email(contact: dict[str, str]) -> None:
+    if not SMTP_HOST or not SMTP_FROM_EMAIL:
+        raise RuntimeError("SMTP is not configured")
+
+    email = EmailMessage()
+    email["From"] = SMTP_FROM_EMAIL
+    email["To"] = CONTACT_TO_EMAIL
+    email["Reply-To"] = contact["email"]
+    email["Subject"] = f"[L'orthophonie au quotidien] {contact['subject']}"
+    email.set_content(
+        "Un message a été envoyé depuis le formulaire de contact du site.\n\n"
+        f"Nom : {contact['name']}\n"
+        f"Adresse e-mail : {contact['email']}\n\n"
+        f"Message :\n{contact['message']}\n"
+    )
+
+    context = ssl.create_default_context()
+    if SMTP_USE_SSL:
+        smtp = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=20, context=context)
+    else:
+        smtp = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20)
+
+    with smtp:
+        if not SMTP_USE_SSL and SMTP_STARTTLS:
+            smtp.starttls(context=context)
+        if SMTP_USERNAME and SMTP_PASSWORD:
+            smtp.login(SMTP_USERNAME, SMTP_PASSWORD)
+        smtp.send_message(email)
+
+
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.post("/api/contact")
+async def create_contact_message(request: Request) -> dict[str, bool]:
+    payload = await read_json_payload(request)
+
+    if str(payload.get("website", "")).strip():
+        return {"sent": True}
+
+    if not SMTP_HOST or not SMTP_FROM_EMAIL:
+        raise HTTPException(status_code=503, detail="Email service is not configured")
+
+    contact = normalize_contact_payload(payload)
+    enforce_contact_rate_limit(request)
+
+    try:
+        await asyncio.to_thread(send_contact_email, contact)
+    except (OSError, RuntimeError, smtplib.SMTPException):
+        logger.exception("Contact email delivery failed")
+        raise HTTPException(status_code=502, detail="Email delivery failed") from None
+
+    return {"sent": True}
 
 
 @app.post("/api/auth/login")
