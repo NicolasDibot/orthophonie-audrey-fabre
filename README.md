@@ -55,6 +55,8 @@ Tous les messages de contact sont conservés dans l'espace d'administration. Pou
 
 L'adresse saisie dans le formulaire est placée dans `Reply-To`, ce qui permet à Audrey Fabre de répondre directement sans usurper l'adresse de l'expéditeur.
 
+Pour le prototype, `FORMSUBMIT_ENABLED=true` active automatiquement FormSubmit lorsque SMTP n'est pas configuré. La première tentative déclenche un courriel d'activation à confirmer une seule fois. Les tentatives restent enregistrées dans l'espace d'administration même avant cette confirmation. Pour revenir au stockage seul, utiliser `FORMSUBMIT_ENABLED=false` dans Render.
+
 Après déploiement de l'API, mettre son URL publique dans `config.js`, puis pousser la modification pour que GitHub Pages l'utilise.
 
 ## Vérifications

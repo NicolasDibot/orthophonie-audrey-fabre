@@ -19,7 +19,10 @@ from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlparse
+from urllib.request import Request as UrlRequest
+from urllib.request import urlopen
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
@@ -42,7 +45,20 @@ SECRET_KEY = os.getenv("SECRET_KEY", "")
 TOKEN_TTL_SECONDS = int(os.getenv("TOKEN_TTL_SECONDS", str(12 * 60 * 60)))
 MAX_JSON_BYTES = int(os.getenv("MAX_JSON_BYTES", str(12 * 1024 * 1024)))
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(3 * 1024 * 1024)))
-CONTACT_TO_EMAIL = os.getenv("CONTACT_TO_EMAIL", "").strip()
+DEFAULT_CONTACT_TO_EMAIL = base64.b64decode("YXVkcmV5LmZhYnJlQGFwaHAuZnI=").decode(
+    "ascii"
+)
+CONTACT_TO_EMAIL = os.getenv("CONTACT_TO_EMAIL", DEFAULT_CONTACT_TO_EMAIL).strip()
+CONTACT_SITE_URL = os.getenv(
+    "CONTACT_SITE_URL",
+    "https://nicolasdibot.github.io/orthophonie-audrey-fabre/",
+).strip()
+FORMSUBMIT_ENABLED = os.getenv("FORMSUBMIT_ENABLED", "true").lower() in {
+    "1",
+    "true",
+    "yes",
+}
+FORMSUBMIT_ENDPOINT = os.getenv("FORMSUBMIT_ENDPOINT", "").strip()
 SMTP_HOST = os.getenv("SMTP_HOST", "").strip()
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USERNAME = os.getenv("SMTP_USERNAME", "").strip()
@@ -860,6 +876,51 @@ def send_contact_email(contact: dict[str, str]) -> None:
         smtp.send_message(email)
 
 
+def get_formsubmit_endpoint() -> str:
+    endpoint = FORMSUBMIT_ENDPOINT or (
+        f"https://formsubmit.co/ajax/{quote(CONTACT_TO_EMAIL, safe='@.')}"
+    )
+    parsed = urlparse(endpoint)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != "formsubmit.co"
+        or not parsed.path.startswith("/ajax/")
+    ):
+        raise RuntimeError("Invalid FormSubmit endpoint")
+    return endpoint
+
+
+def send_contact_via_formsubmit(contact: dict[str, str]) -> bool:
+    payload = json.dumps(
+        {
+            "name": contact["name"],
+            "email": contact["email"],
+            "_replyto": contact["email"],
+            "_subject": f"[L'orthophonie au quotidien] {contact['subject']}",
+            "message": contact["message"],
+            "_template": "table",
+            "_captcha": "false",
+            "_url": CONTACT_SITE_URL,
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
+    request = UrlRequest(
+        get_formsubmit_endpoint(),
+        data=payload,
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json; charset=utf-8",
+            "Origin": "https://nicolasdibot.github.io",
+            "Referer": CONTACT_SITE_URL,
+            "User-Agent": "Orthophonie-Audrey-Contact/1.0",
+        },
+        method="POST",
+    )
+    with urlopen(request, timeout=20) as response:
+        result = json.loads(response.read().decode("utf-8"))
+    return str(result.get("success", "")).lower() == "true"
+
+
 @app.get("/api/health")
 def health() -> dict[str, str]:
     try:
@@ -903,6 +964,18 @@ async def create_contact_message(request: Request) -> dict[str, bool]:
         except (OSError, RuntimeError, smtplib.SMTPException):
             logger.exception(
                 "Contact email delivery failed; message kept in the admin inbox"
+            )
+    elif FORMSUBMIT_ENABLED:
+        try:
+            sent = await asyncio.to_thread(send_contact_via_formsubmit, contact)
+            if not sent:
+                logger.warning(
+                    "FormSubmit delivery is awaiting form activation; "
+                    "message kept in the admin inbox"
+                )
+        except (HTTPError, URLError, OSError, RuntimeError, ValueError):
+            logger.exception(
+                "FormSubmit delivery failed; message kept in the admin inbox"
             )
 
     if sent:

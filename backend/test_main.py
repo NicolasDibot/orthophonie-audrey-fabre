@@ -27,6 +27,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(main, "SMTP_HOST", "")
     monkeypatch.setattr(main, "SMTP_FROM_EMAIL", "")
     monkeypatch.setattr(main, "CONTACT_TO_EMAIL", "")
+    monkeypatch.setattr(main, "FORMSUBMIT_ENABLED", False)
     monkeypatch.setattr(main, "PUBLIC_BASE_URL", "https://api.example.test")
     main.rate_limit_state.clear()
     with TestClient(main.app, base_url="https://api.example.test") as test_client:
@@ -113,6 +114,29 @@ def test_contact_message_is_persisted_and_only_visible_to_admin(
     deleted = client.delete(f"/api/contact/{messages[0]['id']}", headers=headers)
     assert deleted.status_code == 200
     assert client.get("/api/state", headers=headers).json()["contactMessages"] == []
+
+
+def test_contact_message_uses_formsubmit_fallback(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(main, "FORMSUBMIT_ENABLED", True)
+    monkeypatch.setattr(main, "send_contact_via_formsubmit", lambda contact: True)
+
+    response = client.post(
+        "/api/contact",
+        json={
+            "name": "Personne test",
+            "email": "personne@example.test",
+            "subject": "Question générale",
+            "message": "Bonjour, ceci est un test.",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"sent": True, "stored": True}
+    headers = login(client)
+    messages = client.get("/api/state", headers=headers).json()["contactMessages"]
+    assert messages[0]["deliveryStatus"] == "sent"
 
 
 def test_comments_require_moderation_and_admin_replies_follow_parent(

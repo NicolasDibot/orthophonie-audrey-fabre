@@ -21,5 +21,9 @@ services:
         value: Europe/Paris
       - key: ENABLE_API_DOCS
         value: "false"
+      - key: FORMSUBMIT_ENABLED
+        value: "true"
+      - key: CONTACT_SITE_URL
+        value: https://nicolasdibot.github.io/orthophonie-audrey-fabre/
       - key: DATABASE_URL
         sync: false
