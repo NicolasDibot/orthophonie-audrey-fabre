@@ -4258,8 +4258,24 @@ async function downloadResourcePdf(resource, control) {
   const stopControlLoading = setControlLoading(control, "Préparation...");
 
   try {
-    const pdf = await buildResourcePdf(resource);
-    pdf.save(`${getResourceFileName(resource)}.pdf`);
+    const embeddedAttachment = await prepareEmbeddedAttachment(resource.attachment);
+    let pdf = await buildResourcePdf(resource, {
+      embeddedPdfPageCount: embeddedAttachment?.pageCount ?? 0,
+      embeddedAttachmentType: embeddedAttachment?.type ?? "",
+    });
+    let pdfBytes = new Uint8Array(pdf.output("arraybuffer"));
+
+    if (embeddedAttachment) {
+      try {
+        pdfBytes = await appendEmbeddedAttachment(pdfBytes, embeddedAttachment);
+      } catch (error) {
+        console.info("Le fichier joint n'a pas pu être intégré au PDF.", error);
+        pdf = await buildResourcePdf(resource);
+        pdfBytes = new Uint8Array(pdf.output("arraybuffer"));
+      }
+    }
+
+    downloadPdfBytes(pdfBytes, `${getResourceFileName(resource)}.pdf`);
   } catch (error) {
     console.error("La création du PDF a échoué.", error);
     window.alert("Le PDF n'a pas pu être créé. Vous pouvez utiliser le bouton Imprimer.");
@@ -4269,7 +4285,8 @@ async function downloadResourcePdf(resource, control) {
   }
 }
 
-async function buildResourcePdf(resource) {
+async function buildResourcePdf(resource, options = {}) {
+  const { embeddedPdfPageCount = 0, embeddedAttachmentType = "" } = options;
   const JsPdf = window.jspdf?.jsPDF;
   if (!JsPdf) {
     throw new Error("Le générateur PDF n'est pas disponible.");
@@ -4313,7 +4330,7 @@ async function buildResourcePdf(resource) {
       gapAfter = 3,
       indent = 0,
     } = options;
-    const text = String(value ?? "").trim();
+    const text = String(value ?? "").normalize("NFC").trim();
     if (!text) {
       return;
     }
@@ -4364,10 +4381,9 @@ async function buildResourcePdf(resource) {
     gapAfter: 7,
   });
 
-  const imageUrl = getResourceExportImageUrl(resource);
-  if (imageUrl) {
+  const exportImages = await loadResourceExportImagesForPdf(resource);
+  exportImages.forEach((image) => {
     try {
-      const image = await loadImageForPdf(imageUrl);
       const imageWidth = contentWidth;
       const imageHeight = Math.min(72, imageWidth * (image.height / image.width));
       const renderedWidth = imageHeight === 72
@@ -4380,7 +4396,7 @@ async function buildResourcePdf(resource) {
     } catch (error) {
       console.info("Illustration non intégrée au PDF.", error);
     }
-  }
+  });
 
   const description = resource.body || resource.summary;
   if (description) {
@@ -4449,7 +4465,7 @@ async function buildResourcePdf(resource) {
     });
   }
 
-  if (resource.attachment && !isImageResource(resource.attachment)) {
+  if (resource.attachment && (!isImageResource(resource.attachment) || embeddedAttachmentType === "image")) {
     ensureSpace(26);
     addText("Ressource associée", {
       fontSize: 15,
@@ -4458,13 +4474,41 @@ async function buildResourcePdf(resource) {
       lineHeight: 7,
       gapAfter: 2,
     });
-    addText(resource.attachment.label || "Ouvrir la ressource", {
-      fontSize: 11.5,
-      fontStyle: "bold",
-      lineHeight: 5.7,
-      gapAfter: 2,
-    });
+    const attachmentLabel = getExportAttachmentLabel(resource);
+    if (attachmentLabel) {
+      addText(attachmentLabel, {
+        fontSize: 11.5,
+        fontStyle: "bold",
+        lineHeight: 5.7,
+        gapAfter: 2,
+      });
+    }
     const attachmentUrl = getPrintableAttachmentUrl(resource.attachment);
+    if (embeddedAttachmentType === "pdf" && embeddedPdfPageCount > 0) {
+      addText(
+        `Le document joint est intégré dans ${embeddedPdfPageCount > 1 ? "les pages suivantes" : "la page suivante"}.`,
+        {
+          fontSize: 10.5,
+          color: [70, 83, 89],
+          lineHeight: 5.2,
+          gapAfter: 2,
+        },
+      );
+    } else if (embeddedAttachmentType === "image") {
+      addText("L'image jointe est reproduite en pleine page à la suite, sans recadrage.", {
+        fontSize: 10.5,
+        color: [70, 83, 89],
+        lineHeight: 5.2,
+        gapAfter: 2,
+      });
+    } else if (isVideoResource(resource.attachment)) {
+      addText("Une miniature de la vidéo est intégrée dans cette fiche. La vidéo complète reste accessible depuis le site.", {
+        fontSize: 10.5,
+        color: [70, 83, 89],
+        lineHeight: 5.2,
+        gapAfter: 2,
+      });
+    }
     if (attachmentUrl) {
       const linkLines = pdf.splitTextToSize(attachmentUrl, contentWidth);
       pdf.setFont("helvetica", "normal");
@@ -4476,7 +4520,7 @@ async function buildResourcePdf(resource) {
         cursorY += 5.2;
       });
       cursorY += 3;
-    } else {
+    } else if (!embeddedAttachmentType && !isVideoResource(resource.attachment)) {
       addText("Le fichier joint est accessible depuis la fiche sur le site.", {
         fontSize: 10.5,
         color: [70, 83, 89],
@@ -4498,6 +4542,100 @@ async function buildResourcePdf(resource) {
   }
 
   return pdf;
+}
+
+async function prepareEmbeddedPdfAttachment(attachment) {
+  if (!isPdfResource(attachment) || !window.PDFLib?.PDFDocument) {
+    return null;
+  }
+
+  try {
+    const response = await fetch(attachment.url, { credentials: "same-origin" });
+    if (!response.ok) {
+      return null;
+    }
+
+    const contentLength = Number(response.headers.get("content-length") ?? 0);
+    if (contentLength > 30 * 1024 * 1024) {
+      return null;
+    }
+
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength === 0 || bytes.byteLength > 30 * 1024 * 1024) {
+      return null;
+    }
+
+    const document = await window.PDFLib.PDFDocument.load(bytes);
+    const pageCount = document.getPageCount();
+    return pageCount > 0 ? { type: "pdf", document, pageCount } : null;
+  } catch (error) {
+    console.info("Le PDF joint n'est pas intégrable et restera accessible depuis le site.", error);
+    return null;
+  }
+}
+
+async function prepareEmbeddedAttachment(attachment) {
+  if (isPdfResource(attachment)) {
+    return prepareEmbeddedPdfAttachment(attachment);
+  }
+
+  if (isImageResource(attachment)) {
+    try {
+      const image = await loadImageForPdf(attachment.url);
+      return { type: "image", image, pageCount: 1 };
+    } catch (error) {
+      console.info("L'image jointe n'est pas intégrable en pleine page.", error);
+    }
+  }
+
+  return null;
+}
+
+async function appendEmbeddedAttachment(basePdfBytes, attachment) {
+  const PdfDocument = window.PDFLib?.PDFDocument;
+  if (!PdfDocument) {
+    throw new Error("Le module de fusion PDF n'est pas disponible.");
+  }
+
+  const document = await PdfDocument.load(basePdfBytes);
+  if (attachment.type === "pdf") {
+    const pageIndices = attachment.document.getPageIndices();
+    const pages = await document.copyPages(attachment.document, pageIndices);
+    pages.forEach((page) => document.addPage(page));
+  } else if (attachment.type === "image") {
+    const imageResponse = await fetch(attachment.image.dataUrl);
+    const imageBytes = await imageResponse.arrayBuffer();
+    const image = await document.embedJpg(imageBytes);
+    const pageWidth = 595.28;
+    const pageHeight = 841.89;
+    const margin = 42;
+    const scale = Math.min(
+      (pageWidth - (margin * 2)) / image.width,
+      (pageHeight - (margin * 2)) / image.height,
+    );
+    const width = image.width * scale;
+    const height = image.height * scale;
+    const page = document.addPage([pageWidth, pageHeight]);
+    page.drawImage(image, {
+      x: (pageWidth - width) / 2,
+      y: (pageHeight - height) / 2,
+      width,
+      height,
+    });
+  }
+  return document.save();
+}
+
+function downloadPdfBytes(bytes, fileName) {
+  const blob = new Blob([bytes], { type: "application/pdf" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function printResourceDocument(resource, control) {
@@ -4539,15 +4677,16 @@ function printResourceDocument(resource, control) {
 
 function createPrintableResourceHtml(resource) {
   const description = resource.body || resource.summary;
-  const imageUrl = getResourceExportImageUrl(resource);
+  const imageUrls = getResourceExportImageUrls(resource);
   const questionnaire = resource.format === "questionnaire"
     ? `<section class="questionnaire"><h2>Questionnaire</h2>${resource.questionnaire.questions
       .map((question, index) => createPrintableQuestionHtml(question, index))
       .join("")}<p class="required-note">* Réponse obligatoire</p></section>`
     : "";
   const attachmentUrl = getPrintableAttachmentUrl(resource.attachment);
+  const attachmentLabel = getExportAttachmentLabel(resource);
   const attachment = resource.attachment && !isImageResource(resource.attachment)
-    ? `<section class="attachment"><h2>Ressource associée</h2><p><strong>${escapeHtml(resource.attachment.label || "Ouvrir la ressource")}</strong></p>${attachmentUrl
+    ? `<section class="attachment"><h2>Ressource associée</h2>${attachmentLabel ? `<p><strong>${escapeHtml(attachmentLabel)}</strong></p>` : ""}${attachmentUrl
       ? `<p class="resource-link"><a href="${escapeHtml(attachmentUrl)}">${escapeHtml(attachmentUrl)}</a></p>`
       : "<p>Le fichier joint est accessible depuis la fiche sur le site.</p>"}</section>`
     : "";
@@ -4588,7 +4727,7 @@ function createPrintableResourceHtml(resource) {
       <h1>${escapeHtml(resource.title)}</h1>
       <p class="theme">${escapeHtml(resource.section)}</p>
     </header>
-    ${imageUrl ? `<img class="illustration" src="${escapeHtml(imageUrl)}" alt="" />` : ""}
+    ${imageUrls.map((imageUrl) => `<img class="illustration" src="${escapeHtml(imageUrl)}" alt="" />`).join("")}
     ${description ? `<section><h2>Présentation</h2><p>${escapeHtml(description)}</p></section>` : ""}
     ${questionnaire}
     ${attachment}
@@ -4615,19 +4754,162 @@ function createPrintableQuestionHtml(question, index) {
   return `<article class="question"><h3>${index + 1}. ${escapeHtml(question.prompt)}${question.required ? " *" : ""}</h3>${answer}</article>`;
 }
 
-function getResourceExportImageUrl(resource) {
+function getResourceExportImageUrls(resource) {
+  const urls = [];
   if (isImageResource(resource.illustration)) {
-    return resource.illustration.url;
+    urls.push(resource.illustration.url);
   }
   if (isImageResource(resource.attachment)) {
-    return resource.attachment.url;
+    urls.push(resource.attachment.url);
   }
-  return getGeneratedPreviewUrl(resource);
+  const youtubeThumbnail = getYouTubeThumbnailUrl(resource.attachment?.url ?? "");
+  if (youtubeThumbnail) {
+    urls.push(youtubeThumbnail);
+  }
+  if (urls.length === 0) {
+    urls.push(getGeneratedPreviewUrl(resource));
+  }
+  return [...new Set(urls)];
+}
+
+async function loadResourceExportImagesForPdf(resource) {
+  const images = [];
+  const imageUrls = getResourceExportImageUrls(resource);
+  const usesGeneratedFallback = imageUrls.length === 1 && imageUrls[0] === getGeneratedPreviewUrl(resource);
+
+  for (const imageUrl of imageUrls) {
+    try {
+      images.push(await loadImageForPdf(imageUrl));
+    } catch (error) {
+      console.info("Image non intégrable au PDF.", error);
+    }
+  }
+
+  if (isDirectVideoResource(resource.attachment)) {
+    try {
+      const videoImage = await captureVideoFrameForPdf(resource.attachment.url);
+      if (usesGeneratedFallback) {
+        images.splice(0, images.length);
+      }
+      images.push(videoImage);
+    } catch (error) {
+      console.info("Miniature vidéo non intégrable au PDF.", error);
+    }
+  }
+
+  if (images.length === 0) {
+    try {
+      images.push(await loadImageForPdf(getGeneratedPreviewUrl(resource)));
+    } catch (error) {
+      console.info("Illustration de remplacement non intégrable au PDF.", error);
+    }
+  }
+
+  return images;
+}
+
+function captureVideoFrameForPdf(url) {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement("video");
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "auto";
+    if (!String(url).startsWith("data:")) {
+      video.crossOrigin = "anonymous";
+    }
+
+    let settled = false;
+    let seekRequested = false;
+    const finish = (callback, value) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      window.clearTimeout(timeoutId);
+      video.removeAttribute("src");
+      video.load();
+      callback(value);
+    };
+    const capture = () => {
+      try {
+        const maxWidth = 1600;
+        const ratio = Math.min(1, maxWidth / video.videoWidth);
+        const width = Math.max(1, Math.round(video.videoWidth * ratio));
+        const height = Math.max(1, Math.round(video.videoHeight * ratio));
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext("2d");
+        context.fillStyle = "#000000";
+        context.fillRect(0, 0, width, height);
+        context.drawImage(video, 0, 0, width, height);
+        finish(resolve, { dataUrl: canvas.toDataURL("image/jpeg", 0.88), width, height });
+      } catch (error) {
+        finish(reject, error);
+      }
+    };
+    const timeoutId = window.setTimeout(
+      () => finish(reject, new Error("Délai de chargement de la vidéo dépassé")),
+      12000,
+    );
+
+    video.addEventListener("loadedmetadata", () => {
+      if (Number.isFinite(video.duration) && video.duration > 0.5) {
+        seekRequested = true;
+        video.currentTime = Math.min(1, video.duration / 4);
+      }
+    }, { once: true });
+    video.addEventListener("seeked", capture, { once: true });
+    video.addEventListener("loadeddata", () => {
+      if (!seekRequested) {
+        capture();
+      }
+    }, { once: true });
+    video.addEventListener(
+      "error",
+      () => finish(reject, new Error("Vidéo inaccessible")),
+      { once: true },
+    );
+    video.src = url;
+    video.load();
+  });
+}
+
+function isPdfResource(attachment) {
+  return Boolean(attachment?.url && (attachment.kind?.includes("pdf") || /\.pdf(?:$|[?#])/i.test(attachment.url)));
+}
+
+function isVideoResource(attachment) {
+  return Boolean(attachment?.url && (attachment.kind?.startsWith("video/") || getYouTubeVideoId(attachment.url)));
+}
+
+function isDirectVideoResource(attachment) {
+  return Boolean(attachment?.url && attachment.kind?.startsWith("video/"));
 }
 
 function getPrintableAttachmentUrl(attachment) {
   const url = String(attachment?.url ?? "").trim();
   return /^https?:\/\//i.test(url) ? url : "";
+}
+
+function getExportAttachmentLabel(resource) {
+  const attachment = resource.attachment;
+  const label = String(attachment?.label ?? "").normalize("NFC").trim();
+  if (!label || isVideoResource(attachment) || isImageResource(attachment)) {
+    return "";
+  }
+
+  const canonicalize = (value) => normalizeText(value)
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/^(?:l|le|la|les|un|une|des|du|de|d)\s+/, "")
+    .replace(/\s+\d+$/, "");
+  const canonicalLabel = canonicalize(label);
+  const canonicalTitle = canonicalize(resource.title);
+  const isDuplicate = canonicalLabel === canonicalTitle
+    || canonicalTitle.includes(canonicalLabel)
+    || canonicalLabel.includes(canonicalTitle);
+  return isDuplicate ? "" : label;
 }
 
 function getResourceFileName(resource) {
