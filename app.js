@@ -4158,6 +4158,10 @@ function openResourceModal(resourceId) {
   const headerActions = document.createElement("div");
   headerActions.className = "modal-actions";
 
+  const pdfButton = createResourceExportButton(resource, "pdf");
+  const printButton = createResourceExportButton(resource, "print");
+  headerActions.append(pdfButton, printButton);
+
   if (isAdminLoggedIn) {
     const editButton = document.createElement("button");
     editButton.className = "modal-edit";
@@ -4234,6 +4238,478 @@ function openResourceModal(resourceId) {
   updateViewerMenuOffset();
   window.addEventListener("resize", updateViewerMenuOffset);
   closeButton.focus();
+}
+
+function createResourceExportButton(resource, action) {
+  const button = document.createElement("button");
+  button.className = "modal-export";
+  button.type = "button";
+
+  if (action === "pdf") {
+    button.textContent = "Télécharger la fiche en PDF";
+    button.setAttribute("aria-label", `Télécharger la fiche ${resource.title} en PDF`);
+    button.addEventListener("click", () => downloadResourcePdf(resource, button));
+    return button;
+  }
+
+  button.textContent = "Imprimer";
+  button.setAttribute("aria-label", `Imprimer la fiche ${resource.title}`);
+  button.addEventListener("click", () => printResourceDocument(resource, button));
+  return button;
+}
+
+async function downloadResourcePdf(resource, control) {
+  const stopLoading = startLoading("Préparation du PDF...");
+  const stopControlLoading = setControlLoading(control, "Préparation...");
+
+  try {
+    const pdf = await buildResourcePdf(resource);
+    pdf.save(`${getResourceFileName(resource)}.pdf`);
+  } catch (error) {
+    console.error("La création du PDF a échoué.", error);
+    window.alert("Le PDF n'a pas pu être créé. Vous pouvez utiliser le bouton Imprimer.");
+  } finally {
+    stopControlLoading();
+    stopLoading();
+  }
+}
+
+async function buildResourcePdf(resource) {
+  const JsPdf = window.jspdf?.jsPDF;
+  if (!JsPdf) {
+    throw new Error("Le générateur PDF n'est pas disponible.");
+  }
+
+  const pdf = new JsPdf({ orientation: "portrait", unit: "mm", format: "a4" });
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
+  const margin = 18;
+  const contentWidth = pageWidth - (margin * 2);
+  const contentBottom = pageHeight - 20;
+  let cursorY = 0;
+
+  const addPageHeader = (addPage = false) => {
+    if (addPage) {
+      pdf.addPage("a4", "portrait");
+    }
+    pdf.setTextColor(6, 91, 86);
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(9.5);
+    pdf.text("L'orthophonie au quotidien", margin, 12);
+    pdf.setDrawColor(166, 181, 175);
+    pdf.setLineWidth(0.35);
+    pdf.line(margin, 16, pageWidth - margin, 16);
+    cursorY = 24;
+  };
+
+  const ensureSpace = (height) => {
+    if (cursorY + height <= contentBottom) {
+      return;
+    }
+    addPageHeader(true);
+  };
+
+  const addText = (value, options = {}) => {
+    const {
+      fontSize = 12.5,
+      fontStyle = "normal",
+      color = [36, 49, 56],
+      lineHeight = fontSize * 0.46,
+      gapAfter = 3,
+      indent = 0,
+    } = options;
+    const text = String(value ?? "").trim();
+    if (!text) {
+      return;
+    }
+
+    pdf.setFont("helvetica", fontStyle);
+    pdf.setFontSize(fontSize);
+    pdf.setTextColor(...color);
+    const paragraphs = text.split(/\n+/).map((paragraph) => paragraph.trim()).filter(Boolean);
+
+    paragraphs.forEach((paragraph, paragraphIndex) => {
+      const lines = pdf.splitTextToSize(paragraph, contentWidth - indent);
+      lines.forEach((line) => {
+        ensureSpace(lineHeight + 1);
+        pdf.text(line, margin + indent, cursorY);
+        cursorY += lineHeight;
+      });
+      if (paragraphIndex < paragraphs.length - 1) {
+        cursorY += 2;
+      }
+    });
+    cursorY += gapAfter;
+  };
+
+  const addAnswerLine = (count = 1) => {
+    for (let index = 0; index < count; index += 1) {
+      ensureSpace(9);
+      cursorY += 5;
+      pdf.setDrawColor(145, 157, 153);
+      pdf.setLineWidth(0.25);
+      pdf.line(margin + 4, cursorY, pageWidth - margin, cursorY);
+      cursorY += 4;
+    }
+  };
+
+  addPageHeader();
+  addText(resource.title, {
+    fontSize: 21,
+    fontStyle: "bold",
+    color: [21, 29, 34],
+    lineHeight: 9.5,
+    gapAfter: 3,
+  });
+  addText(resource.section, {
+    fontSize: 11,
+    fontStyle: "bold",
+    color: [6, 91, 86],
+    lineHeight: 5.5,
+    gapAfter: 7,
+  });
+
+  const imageUrl = getResourceExportImageUrl(resource);
+  if (imageUrl) {
+    try {
+      const image = await loadImageForPdf(imageUrl);
+      const imageWidth = contentWidth;
+      const imageHeight = Math.min(72, imageWidth * (image.height / image.width));
+      const renderedWidth = imageHeight === 72
+        ? Math.min(imageWidth, imageHeight * (image.width / image.height))
+        : imageWidth;
+      ensureSpace(imageHeight + 8);
+      const imageX = margin + ((contentWidth - renderedWidth) / 2);
+      pdf.addImage(image.dataUrl, "JPEG", imageX, cursorY, renderedWidth, imageHeight, undefined, "FAST");
+      cursorY += imageHeight + 8;
+    } catch (error) {
+      console.info("Illustration non intégrée au PDF.", error);
+    }
+  }
+
+  const description = resource.body || resource.summary;
+  if (description) {
+    addText("Présentation", {
+      fontSize: 15,
+      fontStyle: "bold",
+      color: [21, 29, 34],
+      lineHeight: 7,
+      gapAfter: 2,
+    });
+    addText(description, { fontSize: 12.5, lineHeight: 6.4, gapAfter: 7 });
+  }
+
+  if (resource.format === "questionnaire") {
+    addText("Questionnaire", {
+      fontSize: 15,
+      fontStyle: "bold",
+      color: [21, 29, 34],
+      lineHeight: 7,
+      gapAfter: 3,
+    });
+    resource.questionnaire.questions.forEach((question, index) => {
+      ensureSpace(22);
+      addText(`${index + 1}. ${question.prompt}${question.required ? " *" : ""}`, {
+        fontSize: 12.5,
+        fontStyle: "bold",
+        lineHeight: 6.2,
+        gapAfter: 2,
+      });
+
+      if (question.type === "single") {
+        question.options.forEach((option) => {
+          ensureSpace(7);
+          pdf.setDrawColor(36, 49, 56);
+          pdf.circle(margin + 3, cursorY - 1.2, 1.6);
+          addText(option, { fontSize: 11.5, lineHeight: 5.5, gapAfter: 1, indent: 8 });
+        });
+      } else if (question.type === "scale") {
+        ensureSpace(14);
+        [1, 2, 3, 4, 5].forEach((value, scaleIndex) => {
+          const x = margin + 12 + (scaleIndex * 24);
+          pdf.setDrawColor(36, 49, 56);
+          pdf.circle(x, cursorY, 2.7);
+          pdf.setFont("helvetica", "bold");
+          pdf.setFontSize(10.5);
+          pdf.setTextColor(36, 49, 56);
+          pdf.text(String(value), x + 5, cursorY + 1.3);
+        });
+        cursorY += 7;
+        addText("1 : Pas du tout     5 : Tout à fait", {
+          fontSize: 10,
+          color: [70, 83, 89],
+          lineHeight: 5,
+          gapAfter: 3,
+        });
+      } else {
+        addAnswerLine(question.type === "long" ? 5 : 2);
+      }
+      cursorY += 3;
+    });
+    addText("* Réponse obligatoire", {
+      fontSize: 9.5,
+      color: [70, 83, 89],
+      lineHeight: 4.5,
+      gapAfter: 5,
+    });
+  }
+
+  if (resource.attachment && !isImageResource(resource.attachment)) {
+    ensureSpace(26);
+    addText("Ressource associée", {
+      fontSize: 15,
+      fontStyle: "bold",
+      color: [21, 29, 34],
+      lineHeight: 7,
+      gapAfter: 2,
+    });
+    addText(resource.attachment.label || "Ouvrir la ressource", {
+      fontSize: 11.5,
+      fontStyle: "bold",
+      lineHeight: 5.7,
+      gapAfter: 2,
+    });
+    const attachmentUrl = getPrintableAttachmentUrl(resource.attachment);
+    if (attachmentUrl) {
+      const linkLines = pdf.splitTextToSize(attachmentUrl, contentWidth);
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(9.5);
+      pdf.setTextColor(6, 91, 86);
+      linkLines.forEach((line) => {
+        ensureSpace(5.2);
+        pdf.textWithLink(line, margin, cursorY, { url: attachmentUrl });
+        cursorY += 5.2;
+      });
+      cursorY += 3;
+    } else {
+      addText("Le fichier joint est accessible depuis la fiche sur le site.", {
+        fontSize: 10.5,
+        color: [70, 83, 89],
+        lineHeight: 5.2,
+      });
+    }
+  }
+
+  const pageCount = pdf.getNumberOfPages();
+  for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
+    pdf.setPage(pageNumber);
+    pdf.setDrawColor(166, 181, 175);
+    pdf.setLineWidth(0.25);
+    pdf.line(margin, pageHeight - 14, pageWidth - margin, pageHeight - 14);
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(8.5);
+    pdf.setTextColor(70, 83, 89);
+    pdf.text(`Fiche ${pageNumber} / ${pageCount}`, pageWidth - margin, pageHeight - 9, { align: "right" });
+  }
+
+  return pdf;
+}
+
+function printResourceDocument(resource, control) {
+  const stopLoading = startLoading("Préparation de l'impression...");
+  const stopControlLoading = setControlLoading(control, "Préparation...");
+  const frame = document.createElement("iframe");
+  frame.className = "resource-print-frame";
+  frame.title = `Version imprimable de ${resource.title}`;
+  frame.srcdoc = createPrintableResourceHtml(resource);
+  document.body.append(frame);
+
+  let cleanedUp = false;
+  const cleanUp = () => {
+    if (cleanedUp) {
+      return;
+    }
+    cleanedUp = true;
+    stopControlLoading();
+    stopLoading();
+    frame.remove();
+  };
+
+  frame.addEventListener("load", async () => {
+    const printWindow = frame.contentWindow;
+    const printDocument = frame.contentDocument;
+    if (!printWindow || !printDocument) {
+      cleanUp();
+      window.alert("La version imprimable n'a pas pu être préparée.");
+      return;
+    }
+
+    await waitForPrintableImages(printDocument);
+    printWindow.addEventListener("afterprint", cleanUp, { once: true });
+    printWindow.focus();
+    printWindow.print();
+    window.setTimeout(cleanUp, 60000);
+  }, { once: true });
+}
+
+function createPrintableResourceHtml(resource) {
+  const description = resource.body || resource.summary;
+  const imageUrl = getResourceExportImageUrl(resource);
+  const questionnaire = resource.format === "questionnaire"
+    ? `<section class="questionnaire"><h2>Questionnaire</h2>${resource.questionnaire.questions
+      .map((question, index) => createPrintableQuestionHtml(question, index))
+      .join("")}<p class="required-note">* Réponse obligatoire</p></section>`
+    : "";
+  const attachmentUrl = getPrintableAttachmentUrl(resource.attachment);
+  const attachment = resource.attachment && !isImageResource(resource.attachment)
+    ? `<section class="attachment"><h2>Ressource associée</h2><p><strong>${escapeHtml(resource.attachment.label || "Ouvrir la ressource")}</strong></p>${attachmentUrl
+      ? `<p class="resource-link"><a href="${escapeHtml(attachmentUrl)}">${escapeHtml(attachmentUrl)}</a></p>`
+      : "<p>Le fichier joint est accessible depuis la fiche sur le site.</p>"}</section>`
+    : "";
+
+  return `<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <title>${escapeHtml(resource.title)}</title>
+    <style>
+      @page { size: A4 portrait; margin: 16mm 18mm 18mm; }
+      * { box-sizing: border-box; }
+      body { margin: 0; color: #182126; font-family: Arial, Helvetica, sans-serif; font-size: 12pt; line-height: 1.5; }
+      header { border-bottom: 1.5pt solid #a6b5af; padding-bottom: 5mm; margin-bottom: 7mm; }
+      .site-name { margin: 0 0 6mm; color: #065b56; font-size: 10pt; font-weight: 700; }
+      h1 { margin: 0 0 3mm; font-size: 22pt; line-height: 1.15; }
+      .theme { margin: 0; color: #065b56; font-weight: 700; }
+      h2 { margin: 7mm 0 3mm; font-size: 15pt; line-height: 1.2; }
+      p { margin: 0 0 4mm; white-space: pre-line; }
+      .illustration { display: block; width: 100%; max-height: 72mm; margin: 0 auto 7mm; object-fit: contain; break-inside: avoid; }
+      section, .question { break-inside: avoid; }
+      .question { margin: 0 0 7mm; }
+      .question h3 { margin: 0 0 3mm; font-size: 12pt; line-height: 1.35; }
+      .choice { display: flex; gap: 3mm; align-items: flex-start; margin: 2mm 0; }
+      .circle { width: 4mm; height: 4mm; flex: 0 0 4mm; border: 1.2pt solid #243138; border-radius: 50%; }
+      .answer-line { height: 9mm; border-bottom: 1pt solid #8f9d98; }
+      .scale { display: flex; flex-wrap: wrap; gap: 8mm; margin: 3mm 0; }
+      .scale span { display: inline-flex; align-items: center; gap: 2mm; }
+      .required-note { color: #465359; font-size: 9pt; }
+      .resource-link { overflow-wrap: anywhere; color: #065b56; font-size: 9.5pt; }
+      a { color: #065b56; }
+      footer { margin-top: 10mm; border-top: 1pt solid #a6b5af; padding-top: 3mm; color: #465359; font-size: 8.5pt; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <p class="site-name">L'orthophonie au quotidien</p>
+      <h1>${escapeHtml(resource.title)}</h1>
+      <p class="theme">${escapeHtml(resource.section)}</p>
+    </header>
+    ${imageUrl ? `<img class="illustration" src="${escapeHtml(imageUrl)}" alt="" />` : ""}
+    ${description ? `<section><h2>Présentation</h2><p>${escapeHtml(description)}</p></section>` : ""}
+    ${questionnaire}
+    ${attachment}
+    <footer>Document préparé depuis L'orthophonie au quotidien.</footer>
+  </body>
+</html>`;
+}
+
+function createPrintableQuestionHtml(question, index) {
+  let answer = "";
+  if (question.type === "single") {
+    answer = question.options
+      .map((option) => `<div class="choice"><span class="circle"></span><span>${escapeHtml(option)}</span></div>`)
+      .join("");
+  } else if (question.type === "scale") {
+    answer = `<div class="scale">${[1, 2, 3, 4, 5]
+      .map((value) => `<span><i class="circle"></i>${value}</span>`)
+      .join("")}</div><p class="required-note">1 : Pas du tout &nbsp;&nbsp; 5 : Tout à fait</p>`;
+  } else {
+    const lineCount = question.type === "long" ? 5 : 2;
+    answer = Array.from({ length: lineCount }, () => '<div class="answer-line"></div>').join("");
+  }
+
+  return `<article class="question"><h3>${index + 1}. ${escapeHtml(question.prompt)}${question.required ? " *" : ""}</h3>${answer}</article>`;
+}
+
+function getResourceExportImageUrl(resource) {
+  if (isImageResource(resource.illustration)) {
+    return resource.illustration.url;
+  }
+  if (isImageResource(resource.attachment)) {
+    return resource.attachment.url;
+  }
+  return getGeneratedPreviewUrl(resource);
+}
+
+function getPrintableAttachmentUrl(attachment) {
+  const url = String(attachment?.url ?? "").trim();
+  return /^https?:\/\//i.test(url) ? url : "";
+}
+
+function getResourceFileName(resource) {
+  const slug = normalizeText(resource.title)
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 80);
+  return `fiche-${slug || "orthophonie"}`;
+}
+
+function loadImageForPdf(url) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    let settled = false;
+    const finish = (callback, value) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      window.clearTimeout(timeoutId);
+      callback(value);
+    };
+    const timeoutId = window.setTimeout(
+      () => finish(reject, new Error("Délai de chargement de l'image dépassé")),
+      8000,
+    );
+    if (!String(url).startsWith("data:")) {
+      image.crossOrigin = "anonymous";
+    }
+    image.addEventListener("load", () => {
+      try {
+        const maxDimension = 1600;
+        const ratio = Math.min(1, maxDimension / Math.max(image.naturalWidth, image.naturalHeight));
+        const width = Math.max(1, Math.round(image.naturalWidth * ratio));
+        const height = Math.max(1, Math.round(image.naturalHeight * ratio));
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext("2d");
+        context.fillStyle = "#ffffff";
+        context.fillRect(0, 0, width, height);
+        context.drawImage(image, 0, 0, width, height);
+        finish(resolve, { dataUrl: canvas.toDataURL("image/jpeg", 0.88), width, height });
+      } catch (error) {
+        finish(reject, error);
+      }
+    }, { once: true });
+    image.addEventListener(
+      "error",
+      () => finish(reject, new Error("Image inaccessible")),
+      { once: true },
+    );
+    image.src = url;
+  });
+}
+
+function waitForPrintableImages(documentNode) {
+  const images = [...documentNode.images];
+  return Promise.all(images.map((image) => {
+    if (image.complete) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      image.addEventListener("load", resolve, { once: true });
+      image.addEventListener("error", resolve, { once: true });
+      window.setTimeout(resolve, 5000);
+    });
+  }));
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 function createQuestionnairePanel(resource) {

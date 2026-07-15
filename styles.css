@@ -317,7 +317,8 @@ button.admin-pending-indicator:focus-visible {
 
 .admin-button,
 .card-edit-button,
-.modal-edit {
+.modal-edit,
+.modal-export {
   min-height: 50px;
   border: 2px solid var(--teal-dark);
   border-radius: 8px;
@@ -346,7 +347,9 @@ button.admin-pending-indicator:focus-visible {
 .card-edit-button:hover,
 .card-edit-button:focus-visible,
 .modal-edit:hover,
-.modal-edit:focus-visible {
+.modal-edit:focus-visible,
+.modal-export:hover,
+.modal-export:focus-visible {
   border-color: var(--teal);
   outline: 4px solid rgba(255, 191, 71, 0.72);
   outline-offset: 2px;
@@ -2223,6 +2226,20 @@ body.modal-open .modal-shell {
   gap: 10px;
 }
 
+.modal-export {
+  min-height: 58px;
+  font-size: 1rem;
+}
+
+.resource-print-frame {
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .modal-close {
   flex: 0 0 auto;
   width: 58px;
@@ -2407,6 +2424,7 @@ body.modal-open .modal-shell {
   }
 
   .modal-header {
+    flex-direction: column;
     align-items: start;
     padding: 12px;
   }
@@ -2419,6 +2437,20 @@ body.modal-open .modal-shell {
     width: 52px;
     height: 52px;
     font-size: 2rem;
+  }
+
+  .modal-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr) 52px;
+    width: 100%;
+    align-items: stretch;
+  }
+
+  .modal-export {
+    min-width: 0;
+    min-height: 52px;
+    padding: 8px;
+    line-height: 1.2;
   }
 
   .viewer-frame {
