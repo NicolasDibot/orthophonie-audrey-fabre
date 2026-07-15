@@ -16,19 +16,36 @@ const diseases = [
     label: "Maladie de Parkinson",
   },
 ];
+const homeTab = {
+  id: "accueil",
+  label: "Accueil",
+};
 const appointmentTab = {
   id: "prise-rendez-vous",
   label: "Prise de rendez-vous",
 };
-const navigationTabs = [...diseases, appointmentTab];
+const contactTab = {
+  id: "contact",
+  label: "Contact",
+};
+const navigationTabs = [homeTab, ...diseases, appointmentTab, contactTab];
 
 const storagePrefix = "audrey-orthophonie-comments-v2";
 const resourceStorageKey = "audrey-orthophonie-resources-v1";
 const appointmentStorageKey = "audrey-orthophonie-appointments-v1";
+const siteContentStorageKey = "audrey-orthophonie-site-content-v1";
 const authStorageKey = "audrey-orthophonie-auth";
 const adminLogin = "audrey";
 const localAdminPasswordHash = "0e5a170ff0867a879d950b746ab6c1b741cbb413769c35e9647f1e5726a137a4";
 const maxLocalAttachmentBytes = 3 * 1024 * 1024;
+const contactEmail = "audrey.fabre@aphp.fr";
+const defaultSiteContent = {
+  homeTitle: "Bienvenue sur L'orthophonie au quotidien",
+  homeBody:
+    "Ce site est destiné aux patients et à leurs aidants.\n\n" +
+    "Vous y trouverez des informations et des outils sur la maladie de Huntington et la maladie de Parkinson. Les fiches sont classées par thème et peuvent être recherchées par mot-clé.\n\n" +
+    "Vous pouvez aussi laisser un commentaire sur une fiche, demander un rendez-vous ou contacter Audrey Fabre.",
+};
 const resourceSections = [
   "Les fonctions cognitives : que sont-elles ?",
   "Les fonctions cognitives dans la maladie de Huntington",
@@ -84,6 +101,7 @@ const generatedPreviewByKind = {
 
 let editableResourceState = loadEditableResourceState();
 let appointmentState = loadAppointmentState();
+let siteContent = loadSiteContent();
 let resources = [];
 let resourcesById = {};
 let commentState = {};
@@ -174,6 +192,7 @@ async function loadBackendState(options = {}) {
     const state = await apiRequest("/api/state", { auth: true });
     editableResourceState = normalizeEditableResourceState(state.resourceState);
     appointmentState = normalizeAppointmentState(state.appointmentState);
+    siteContent = normalizeSiteContent(state.siteContent);
     commentState = normalizeCommentStateMap(state.commentsByResourceId);
     isAdminLoggedIn = Boolean(state.isAdmin);
 
@@ -381,6 +400,14 @@ function returnToMainPage() {
     closeAdminDialog({ restoreFocus: false });
   }
 
+  if (window.location.hash !== `#${homeTab.id}`) {
+    window.location.hash = homeTab.id;
+  } else if (activeDiseaseId !== homeTab.id) {
+    activeDiseaseId = homeTab.id;
+    renderTabs();
+    renderDisease();
+  }
+
   panelNode.removeAttribute("aria-hidden");
   panelNode.inert = false;
   panelNode.tabIndex = -1;
@@ -401,7 +428,7 @@ function resetViewAfterSessionChange() {
     closeAdminDialog({ restoreFocus: false });
   }
 
-  const homeId = diseases[0].id;
+  const homeId = homeTab.id;
   if (window.location.hash !== `#${homeId}`) {
     window.location.hash = homeId;
   }
@@ -420,11 +447,32 @@ function getInitialDiseaseId() {
 }
 
 function normalizeDiseaseId(id) {
-  return navigationTabs.some((tab) => tab.id === id) ? id : diseases[0].id;
+  return navigationTabs.some((tab) => tab.id === id) ? id : homeTab.id;
 }
 
 function getActiveDisease() {
   return diseases.find((disease) => disease.id === activeDiseaseId) ?? diseases[0];
+}
+
+function normalizeSiteContent(value) {
+  const homeTitle = String(value?.homeTitle ?? "").trim();
+  const homeBody = String(value?.homeBody ?? "").trim();
+  return {
+    homeTitle: homeTitle || defaultSiteContent.homeTitle,
+    homeBody: homeBody || defaultSiteContent.homeBody,
+  };
+}
+
+function loadSiteContent() {
+  try {
+    return normalizeSiteContent(JSON.parse(localStorage.getItem(siteContentStorageKey) || "null"));
+  } catch {
+    return { ...defaultSiteContent };
+  }
+}
+
+function saveSiteContentLocally() {
+  localStorage.setItem(siteContentStorageKey, JSON.stringify(siteContent));
 }
 
 function loadEditableResourceState() {
@@ -619,6 +667,18 @@ function renderAdminControls() {
 }
 
 function renderDisease() {
+  panelNode.classList.toggle("is-content-page", activeDiseaseId === homeTab.id || activeDiseaseId === contactTab.id);
+
+  if (activeDiseaseId === homeTab.id) {
+    renderHomePanel();
+    return;
+  }
+
+  if (activeDiseaseId === contactTab.id) {
+    renderContactPanel();
+    return;
+  }
+
   if (activeDiseaseId === appointmentTab.id) {
     renderAppointmentPanel();
     return;
@@ -634,6 +694,176 @@ function renderDisease() {
   metric.querySelector("strong").dataset.resourceCountValue = "true";
   metricsNode.replaceChildren(metric, createResourceFilters(diseaseResources));
   renderDiseaseResourceResults();
+}
+
+function renderHomePanel() {
+  gridNode.className = "home-view";
+  panelNode.setAttribute("aria-label", "Accueil");
+  metricsNode.replaceChildren();
+
+  const section = document.createElement("section");
+  section.className = "home-content";
+
+  const audience = document.createElement("p");
+  audience.className = "content-page-kicker";
+  audience.textContent = "Pour les patients et les aidants";
+
+  const title = document.createElement("h2");
+  title.textContent = siteContent.homeTitle;
+
+  const body = document.createElement("p");
+  body.className = "home-introduction";
+  body.textContent = siteContent.homeBody;
+
+  section.append(audience, title, body);
+
+  if (isAdminLoggedIn) {
+    const editButton = document.createElement("button");
+    editButton.className = "admin-button admin-button-primary home-edit-button";
+    editButton.type = "button";
+    editButton.textContent = "Modifier le texte d'accueil";
+    editButton.addEventListener("click", openHomeEditor);
+    section.append(editButton);
+  }
+
+  gridNode.replaceChildren(section);
+}
+
+function renderContactPanel() {
+  gridNode.className = "contact-view";
+  panelNode.setAttribute("aria-label", "Contacter Audrey Fabre");
+  metricsNode.replaceChildren();
+
+  const section = document.createElement("section");
+  section.className = "contact-content";
+
+  const title = document.createElement("h2");
+  title.textContent = "Contacter Audrey Fabre";
+
+  const intro = document.createElement("p");
+  intro.className = "contact-introduction";
+  intro.textContent = "Utilisez ce formulaire pour envoyer un courriel à Audrey Fabre.";
+
+  const emailLink = document.createElement("a");
+  emailLink.className = "contact-email";
+  emailLink.href = `mailto:${contactEmail}`;
+  emailLink.textContent = contactEmail;
+
+  const form = document.createElement("form");
+  form.className = "contact-form";
+
+  const nameField = createFieldLabel("Votre nom", "input", {
+    type: "text",
+    name: "contactName",
+    autocomplete: "name",
+    required: "true",
+  });
+  const emailField = createFieldLabel("Votre adresse e-mail", "input", {
+    type: "email",
+    name: "contactEmail",
+    autocomplete: "email",
+    required: "true",
+  });
+  const subjectField = createFieldLabel("Objet", "input", {
+    type: "text",
+    name: "contactSubject",
+    required: "true",
+  });
+  const messageField = createFieldLabel("Votre message", "textarea", {
+    name: "contactMessage",
+    rows: "8",
+    required: "true",
+  });
+
+  const submit = document.createElement("button");
+  submit.className = "admin-button admin-button-primary contact-submit";
+  submit.type = "submit";
+  submit.textContent = "Envoyer le courriel";
+
+  form.append(nameField, emailField, subjectField, messageField, submit);
+  form.addEventListener("submit", handleContactSubmit);
+  section.append(title, intro, emailLink, form);
+  gridNode.replaceChildren(section);
+}
+
+function handleContactSubmit(event) {
+  event.preventDefault();
+  const formData = new FormData(event.currentTarget);
+  const name = String(formData.get("contactName") ?? "").trim();
+  const email = String(formData.get("contactEmail") ?? "").trim();
+  const subject = String(formData.get("contactSubject") ?? "").trim();
+  const message = String(formData.get("contactMessage") ?? "").trim();
+  const body = `Nom : ${name}\nAdresse e-mail : ${email}\n\n${message}`;
+  window.location.href = `mailto:${contactEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+
+function openHomeEditor() {
+  if (!isAdminLoggedIn) {
+    openLoginDialog();
+    return;
+  }
+
+  const form = document.createElement("form");
+  form.className = "admin-form home-editor-form";
+
+  const titleField = createFieldLabel("Titre de la page d'accueil", "input", {
+    type: "text",
+    name: "homeTitle",
+    value: siteContent.homeTitle,
+    maxlength: "200",
+    required: "true",
+  });
+  const bodyField = createFieldLabel("Texte de la page d'accueil", "textarea", {
+    name: "homeBody",
+    rows: "12",
+    maxlength: "6000",
+    required: "true",
+  });
+  bodyField.querySelector("textarea").value = siteContent.homeBody;
+
+  const error = document.createElement("p");
+  error.className = "admin-error";
+  error.hidden = true;
+  const actions = createAdminFormActions("Enregistrer");
+
+  form.append(titleField, bodyField, error, actions);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    error.hidden = true;
+    const formData = new FormData(form);
+    const nextContent = normalizeSiteContent({
+      homeTitle: formData.get("homeTitle"),
+      homeBody: formData.get("homeBody"),
+    });
+    const previousContent = { ...siteContent };
+    const stopLoading = startLoading("Enregistrement de la page d'accueil...");
+    const stopSubmitLoading = setFormLoading(form, "Enregistrement...");
+
+    try {
+      siteContent = nextContent;
+      if (apiEnabled) {
+        const result = await apiRequest("/api/site-content", {
+          method: "PUT",
+          auth: true,
+          body: { siteContent },
+        });
+        siteContent = normalizeSiteContent(result.siteContent);
+      } else {
+        saveSiteContentLocally();
+      }
+      renderDisease();
+      closeAdminDialog();
+    } catch {
+      siteContent = previousContent;
+      error.hidden = false;
+      error.textContent = "Le texte n'a pas pu être enregistré. Vérifiez la connexion puis réessayez.";
+    } finally {
+      stopSubmitLoading();
+      stopLoading();
+    }
+  });
+
+  openAdminDialog("Modifier la page d'accueil", form);
 }
 
 function createMetric(value, label) {

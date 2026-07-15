@@ -169,7 +169,6 @@ button:disabled {
   color: #fff;
 }
 
-.eyebrow,
 .section-kicker {
   margin: 0 0 10px;
   color: #d9f0ec;
@@ -1573,9 +1572,132 @@ body.modal-open .header-content {
   padding: 9px clamp(14px, 1.6vw, 24px);
 }
 
-body.modal-open .eyebrow,
 body.modal-open .header-copy {
   display: none;
+}
+
+.disease-panel.is-content-page .panel-heading {
+  display: none;
+}
+
+.home-view,
+.contact-view {
+  width: min(1180px, 100%);
+  margin: 0 auto;
+}
+
+.home-content,
+.contact-content {
+  padding: clamp(18px, 3vw, 48px) clamp(4px, 2vw, 28px);
+}
+
+.content-page-kicker {
+  margin: 0 0 12px;
+  color: var(--teal-dark);
+  font-size: clamp(1.15rem, 1.5vw, 1.4rem);
+  font-weight: 900;
+}
+
+.home-content h2,
+.contact-content h2 {
+  max-width: 980px;
+  font-size: clamp(2.2rem, 4vw, 4.2rem);
+}
+
+.home-introduction,
+.contact-introduction {
+  max-width: 1000px;
+  margin: 24px 0 0;
+  color: #243138;
+  font-size: clamp(1.35rem, 2vw, 1.9rem);
+  line-height: 1.58;
+}
+
+.home-introduction {
+  white-space: pre-line;
+}
+
+.home-edit-button {
+  margin-top: 28px;
+}
+
+.contact-email {
+  display: inline-block;
+  margin-top: 12px;
+  color: var(--teal-dark);
+  font-size: clamp(1.2rem, 1.6vw, 1.5rem);
+  font-weight: 900;
+}
+
+.contact-email:hover,
+.contact-email:focus-visible {
+  outline: 4px solid rgba(255, 191, 71, 0.72);
+  outline-offset: 3px;
+}
+
+.contact-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  max-width: 1000px;
+  margin-top: 32px;
+}
+
+.contact-form label {
+  display: grid;
+  gap: 8px;
+  color: #334148;
+  font-size: 1.18rem;
+  font-weight: 850;
+}
+
+.contact-form label:nth-of-type(3),
+.contact-form label:nth-of-type(4),
+.contact-submit {
+  grid-column: 1 / -1;
+}
+
+.contact-form input,
+.contact-form textarea {
+  width: 100%;
+  min-height: 58px;
+  border: 2px solid var(--line);
+  border-radius: 8px;
+  padding: 13px 15px;
+  color: var(--ink);
+  background: #fff;
+  font-size: 1.18rem;
+}
+
+.contact-form textarea {
+  min-height: 210px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.contact-form input:focus,
+.contact-form textarea:focus {
+  border-color: var(--teal);
+  outline: 4px solid rgba(255, 191, 71, 0.72);
+  outline-offset: 2px;
+}
+
+.contact-submit {
+  justify-self: start;
+  min-height: 58px;
+  padding-inline: 22px;
+  font-size: 1.12rem;
+}
+
+@media (max-width: 700px) {
+  .contact-form {
+    grid-template-columns: 1fr;
+  }
+
+  .contact-form label,
+  .contact-submit {
+    grid-column: 1;
+  }
 }
 
 body.modal-open h1 {
@@ -2296,5 +2418,50 @@ body.modal-open .modal-shell {
   .resource-summary,
   .tag {
     -webkit-line-clamp: unset;
+  }
+
+  .site-header {
+    min-height: 320px;
+  }
+
+  .header-content {
+    padding: 34px 14px 30px;
+  }
+
+  .site-header h1 {
+    font-size: clamp(2.75rem, 12.5vw, 3.5rem);
+    line-height: 1.08;
+    overflow-wrap: anywhere;
+  }
+
+  .header-copy {
+    font-size: 1.18rem;
+    line-height: 1.4;
+  }
+
+  .tabs {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .disease-menu {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .admin-controls {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .tab-button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 430px) {
+  .site-header h1 {
+    font-size: 2.65rem;
   }
 }

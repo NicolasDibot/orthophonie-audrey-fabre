@@ -31,8 +31,19 @@ TOKEN_TTL_SECONDS = int(os.getenv("TOKEN_TTL_SECONDS", str(12 * 60 * 60)))
 MAX_JSON_BYTES = int(os.getenv("MAX_JSON_BYTES", str(12 * 1024 * 1024)))
 
 DEFAULT_RESOURCE_STATE = {"overrides": {}, "created": [], "hidden": [], "deleted": []}
+DEFAULT_SITE_CONTENT = {
+    "homeTitle": "Bienvenue sur L'orthophonie au quotidien",
+    "homeBody": (
+        "Ce site est destiné aux patients et à leurs aidants.\n\n"
+        "Vous y trouverez des informations et des outils sur la maladie de Huntington "
+        "et la maladie de Parkinson. Les fiches sont classées par thème et peuvent être "
+        "recherchées par mot-clé.\n\n"
+        "Vous pouvez aussi laisser un commentaire sur une fiche, demander un rendez-vous "
+        "ou contacter Audrey Fabre."
+    ),
+}
 
-app = FastAPI(title="API Cabinet d'Orthophonie d'Audrey Fabre")
+app = FastAPI(title="API L'orthophonie au quotidien")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[origin.strip() for origin in os.getenv("CORS_ORIGINS", "*").split(",") if origin.strip()],
@@ -81,6 +92,7 @@ def initialize_database() -> None:
         ensure_kv(connection, "resource_state", DEFAULT_RESOURCE_STATE)
         ensure_kv(connection, "comments_by_resource_id", {})
         ensure_kv(connection, "appointment_state", create_default_appointment_state())
+        ensure_kv(connection, "site_content", DEFAULT_SITE_CONTENT)
 
 
 def ensure_kv(connection: Any, key: str, value: Any) -> None:
@@ -260,6 +272,18 @@ def normalize_resource_state(value: Any) -> dict[str, Any]:
     }
 
 
+def normalize_site_content(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return dict(DEFAULT_SITE_CONTENT)
+
+    home_title = str(value.get("homeTitle", "")).strip()
+    home_body = str(value.get("homeBody", "")).strip()
+    return {
+        "homeTitle": home_title[:200] or DEFAULT_SITE_CONTENT["homeTitle"],
+        "homeBody": home_body[:6000] or DEFAULT_SITE_CONTENT["homeBody"],
+    }
+
+
 def normalize_comments_map(value: Any) -> dict[str, list[dict[str, Any]]]:
     if not isinstance(value, dict):
         return {}
@@ -422,14 +446,30 @@ def get_state(admin_payload: dict[str, Any] | None = Depends(get_optional_admin_
         resource_state = normalize_resource_state(read_kv(connection, "resource_state", DEFAULT_RESOURCE_STATE))
         comments_by_resource_id = normalize_comments_map(read_kv(connection, "comments_by_resource_id", {}))
         appointment_state = normalize_appointment_state(read_kv(connection, "appointment_state", create_default_appointment_state()))
+        site_content = normalize_site_content(read_kv(connection, "site_content", DEFAULT_SITE_CONTENT))
 
     is_admin = bool(admin_payload)
     return {
         "resourceState": resource_state,
         "commentsByResourceId": comments_by_resource_id if is_admin else public_comments_map(comments_by_resource_id),
         "appointmentState": appointment_state if is_admin else public_appointment_state(appointment_state),
+        "siteContent": site_content,
         "isAdmin": is_admin,
     }
+
+
+@app.put("/api/site-content")
+async def update_site_content(
+    request: Request,
+    _: dict[str, Any] = Depends(get_admin_payload),
+) -> dict[str, Any]:
+    payload = await read_json_payload(request)
+    site_content = normalize_site_content(payload.get("siteContent"))
+
+    with get_connection() as connection:
+        write_kv(connection, "site_content", site_content)
+
+    return {"siteContent": site_content}
 
 
 @app.put("/api/resource-state")
