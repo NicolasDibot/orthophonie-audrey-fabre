@@ -114,6 +114,12 @@ const resourceSections = [
 ];
 const alwaysVisibleResourceSections = ["Voix et parole"];
 const generatedPreviewBasePath = "assets/generated/";
+const externalSitePreviewByResourceId = {
+  "padlet-11-les-livrets-proposes-par-des-orthophonistes-": "assets/external-previews/editions-retz-annie-cornu-leyrit.jpg",
+  "padlet-12-les-livrets-proposes-par-des-professionnels-": "assets/external-previews/carnets-leon-augustine.jpg",
+  "padlet-27-les-plateformes-d-accompagnement": "assets/external-previews/huntington-academy.jpg",
+  "padlet-29-faites-vous-plaisir-votre-cerveau-vous-le-re": "assets/external-previews/amazon-faites-vous-plaisir.jpg",
+};
 const generatedPreviewByResourceId = {
   "padlet-02-les-fonctions-executives": "executive-functions.jpg",
   "padlet-03-la-perception-visuo-spatiale": "visuospatial-perception.jpg",
@@ -4766,6 +4772,10 @@ function getResourceExportImageUrls(resource) {
   if (youtubeThumbnail) {
     urls.push(youtubeThumbnail);
   }
+  const externalSitePreview = getExternalSitePreviewUrl(resource.id);
+  if (externalSitePreview) {
+    urls.push(externalSitePreview);
+  }
   if (urls.length === 0) {
     urls.push(getGeneratedPreviewUrl(resource));
   }
@@ -5409,23 +5419,42 @@ function createOpenFileLink(attachment) {
 function createExternalResourcePanel(resource, attachment) {
   const panel = document.createElement("div");
   panel.className = "external-resource-panel";
-
-  const title = document.createElement("h3");
-  title.textContent = resource.title;
-
-  const text = document.createElement("p");
-  text.textContent =
-    "Cette ressource ne peut pas être affichée directement dans la page. Elle s'ouvre dans un nouvel onglet.";
+  const previewUrl = getExternalSitePreviewUrl(resource.id)
+    || (isImageResource(resource.illustration) ? resource.illustration.url : "");
 
   const link = document.createElement("a");
   link.className = "external-resource-link";
   link.href = attachment.url;
   link.target = "_blank";
   link.rel = "noopener noreferrer";
-  link.textContent = isBookLink(attachment.url) ? "Ouvrir le livre conseillé" : "Ouvrir la ressource";
+  link.textContent = isBookLink(attachment.url) ? "Voir le livre conseillé" : "Consulter le site";
 
-  panel.append(title, text, link);
+  if (previewUrl) {
+    const previewLink = document.createElement("a");
+    previewLink.className = "external-preview-link";
+    previewLink.href = attachment.url;
+    previewLink.target = "_blank";
+    previewLink.rel = "noopener noreferrer";
+    previewLink.setAttribute("aria-label", `${link.textContent} : ${resource.title}`);
+
+    const preview = document.createElement("img");
+    preview.className = "external-site-preview";
+    preview.src = previewUrl;
+    preview.alt = `Aperçu du site lié à la fiche ${resource.title}`;
+    previewLink.append(preview);
+    panel.append(previewLink, link);
+    return panel;
+  }
+
+  panel.classList.add("is-fallback");
+  const fallback = document.createElement("p");
+  fallback.textContent = "Consulter la ressource sur son site.";
+  panel.append(fallback, link);
   return panel;
+}
+
+function getExternalSitePreviewUrl(resourceId) {
+  return externalSitePreviewByResourceId[resourceId] ?? "";
 }
 
 function isBookLink(url) {

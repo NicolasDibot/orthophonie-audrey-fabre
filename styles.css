@@ -2320,21 +2320,20 @@ body.modal-open .modal-shell {
 }
 
 .external-resource-panel {
-  min-height: min(72dvh, 850px);
   display: grid;
-  align-content: center;
+  align-content: start;
   justify-items: start;
-  gap: 22px;
+  gap: 14px;
   border: 2px solid var(--line);
   border-radius: 8px;
-  padding: clamp(28px, 4vw, 56px);
+  padding: 14px;
   background: #fff;
 }
 
-.external-resource-panel h3 {
-  max-width: 920px;
-  font-size: clamp(2rem, 3.8vw, 4rem);
-  line-height: 1.08;
+.external-resource-panel.is-fallback {
+  min-height: 260px;
+  align-content: center;
+  padding: clamp(24px, 4vw, 48px);
 }
 
 .external-resource-panel p {
@@ -2345,16 +2344,40 @@ body.modal-open .modal-shell {
   line-height: 1.45;
 }
 
+.external-preview-link {
+  display: block;
+  width: 100%;
+  border: 2px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.external-preview-link:hover,
+.external-preview-link:focus-visible {
+  outline: 5px solid rgba(8, 116, 111, 0.22);
+  outline-offset: 2px;
+}
+
+.external-site-preview {
+  display: block;
+  width: 100%;
+  max-height: min(64dvh, 760px);
+  object-fit: contain;
+  object-position: top center;
+  background: #fff;
+}
+
 .external-resource-link {
   display: inline-flex;
   align-items: center;
-  min-height: 72px;
+  min-height: 58px;
   border: 3px solid var(--teal-dark);
   border-radius: 8px;
-  padding: 16px 22px;
+  padding: 12px 18px;
   color: #fff;
   background: var(--teal-dark);
-  font-size: clamp(1.25rem, 1.8vw, 1.8rem);
+  font-size: clamp(1.1rem, 1.4vw, 1.4rem);
   font-weight: 900;
   text-decoration: none;
 }
