@@ -1644,14 +1644,6 @@ body.modal-open .header-copy {
   background: #111;
 }
 
-.contact-email {
-  display: inline-block;
-  margin: 12px 0 0;
-  color: var(--teal-dark);
-  font-size: clamp(1.2rem, 1.6vw, 1.5rem);
-  font-weight: 900;
-}
-
 .contact-form {
   position: relative;
   display: grid;

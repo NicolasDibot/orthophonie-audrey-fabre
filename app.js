@@ -95,7 +95,6 @@ const authStorageKey = "audrey-orthophonie-auth";
 const adminLogin = "audrey";
 const localAdminPasswordHash = "0e5a170ff0867a879d950b746ab6c1b741cbb413769c35e9647f1e5726a137a4";
 const maxLocalAttachmentBytes = 3 * 1024 * 1024;
-const contactEmail = "audrey.fabre@aphp.fr";
 const newThemeOptionValue = "__new_theme__";
 const defaultSiteContent = {
   homeTitle: "Bienvenue sur L'orthophonie au quotidien",
@@ -916,10 +915,6 @@ function renderContactPanel() {
   intro.className = "contact-introduction";
   intro.textContent = "Utilisez ce formulaire pour envoyer un courriel à Audrey Fabre.";
 
-  const emailText = document.createElement("p");
-  emailText.className = "contact-email";
-  emailText.textContent = contactEmail;
-
   const form = document.createElement("form");
   form.className = "contact-form";
 
@@ -969,7 +964,7 @@ function renderContactPanel() {
 
   form.append(nameField, emailField, subjectField, messageField, honeypotField, notice, submit);
   form.addEventListener("submit", handleContactSubmit);
-  section.append(title, intro, emailText, form);
+  section.append(title, intro, form);
   gridNode.replaceChildren(section);
 }
 
