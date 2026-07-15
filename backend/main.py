@@ -93,6 +93,7 @@ def initialize_database() -> None:
         ensure_kv(connection, "comments_by_resource_id", {})
         ensure_kv(connection, "appointment_state", create_default_appointment_state())
         ensure_kv(connection, "site_content", DEFAULT_SITE_CONTENT)
+        ensure_kv(connection, "questionnaire_responses_by_resource_id", {})
 
 
 def ensure_kv(connection: Any, key: str, value: Any) -> None:
@@ -296,6 +297,49 @@ def normalize_comments_map(value: Any) -> dict[str, list[dict[str, Any]]]:
     return normalized
 
 
+def normalize_questionnaire_responses_map(value: Any) -> dict[str, list[dict[str, Any]]]:
+    if not isinstance(value, dict):
+        return {}
+
+    normalized: dict[str, list[dict[str, Any]]] = {}
+    for resource_id, responses in value.items():
+        if isinstance(resource_id, str) and isinstance(responses, list):
+            normalized[resource_id] = [response for response in responses if isinstance(response, dict)]
+
+    return normalized
+
+
+def normalize_questionnaire_response_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    raw_answers = payload.get("answers")
+    if not isinstance(raw_answers, list) or not raw_answers or len(raw_answers) > 50:
+        raise HTTPException(status_code=400, detail="Answers required")
+
+    answers: list[dict[str, Any]] = []
+    for raw_answer in raw_answers:
+        if not isinstance(raw_answer, dict):
+            continue
+
+        question_id = str(raw_answer.get("questionId", "")).strip()[:160]
+        prompt = str(raw_answer.get("prompt", "")).strip()[:500]
+        raw_value = raw_answer.get("value", "")
+        if isinstance(raw_value, list):
+            value: str | list[str] = [str(item).strip()[:500] for item in raw_value[:20] if str(item).strip()]
+        else:
+            value = str(raw_value).strip()[:4000]
+
+        if question_id and prompt and value:
+            answers.append({"questionId": question_id, "prompt": prompt, "value": value})
+
+    if not answers:
+        raise HTTPException(status_code=400, detail="No valid answer")
+
+    return {
+        "id": str(uuid.uuid4()),
+        "createdAt": utc_now(),
+        "answers": answers,
+    }
+
+
 def normalize_appointment_state(value: Any) -> dict[str, list[dict[str, Any]]]:
     if not isinstance(value, dict):
         return create_default_appointment_state()
@@ -447,6 +491,9 @@ def get_state(admin_payload: dict[str, Any] | None = Depends(get_optional_admin_
         comments_by_resource_id = normalize_comments_map(read_kv(connection, "comments_by_resource_id", {}))
         appointment_state = normalize_appointment_state(read_kv(connection, "appointment_state", create_default_appointment_state()))
         site_content = normalize_site_content(read_kv(connection, "site_content", DEFAULT_SITE_CONTENT))
+        questionnaire_responses = normalize_questionnaire_responses_map(
+            read_kv(connection, "questionnaire_responses_by_resource_id", {})
+        )
 
     is_admin = bool(admin_payload)
     return {
@@ -454,6 +501,7 @@ def get_state(admin_payload: dict[str, Any] | None = Depends(get_optional_admin_
         "commentsByResourceId": comments_by_resource_id if is_admin else public_comments_map(comments_by_resource_id),
         "appointmentState": appointment_state if is_admin else public_appointment_state(appointment_state),
         "siteContent": site_content,
+        "questionnaireResponsesByResourceId": questionnaire_responses if is_admin else {},
         "isAdmin": is_admin,
     }
 
@@ -554,6 +602,62 @@ def delete_comment(
         write_kv(connection, "comments_by_resource_id", comments_by_resource_id)
 
     return {"comments": comments}
+
+
+@app.post("/api/questionnaires/{resource_id}/responses")
+async def create_questionnaire_response(resource_id: str, request: Request) -> dict[str, Any]:
+    if not resource_id or len(resource_id) > 200:
+        raise HTTPException(status_code=400, detail="Invalid resource id")
+
+    payload = await read_json_payload(request)
+    response = normalize_questionnaire_response_payload(payload)
+
+    with get_connection() as connection:
+        responses_by_resource_id = normalize_questionnaire_responses_map(
+            read_kv(connection, "questionnaire_responses_by_resource_id", {})
+        )
+        responses = responses_by_resource_id.setdefault(resource_id, [])
+        responses.insert(0, response)
+        responses_by_resource_id[resource_id] = responses[:1000]
+        write_kv(connection, "questionnaire_responses_by_resource_id", responses_by_resource_id)
+
+    return {"response": response}
+
+
+@app.delete("/api/questionnaires/{resource_id}/responses/{response_id}")
+def delete_questionnaire_response(
+    resource_id: str,
+    response_id: str,
+    _: dict[str, Any] = Depends(get_admin_payload),
+) -> dict[str, Any]:
+    with get_connection() as connection:
+        responses_by_resource_id = normalize_questionnaire_responses_map(
+            read_kv(connection, "questionnaire_responses_by_resource_id", {})
+        )
+        responses = [
+            response
+            for response in responses_by_resource_id.get(resource_id, [])
+            if response.get("id") != response_id
+        ]
+        responses_by_resource_id[resource_id] = responses
+        write_kv(connection, "questionnaire_responses_by_resource_id", responses_by_resource_id)
+
+    return {"responses": responses}
+
+
+@app.delete("/api/questionnaires/{resource_id}/responses")
+def delete_questionnaire_responses(
+    resource_id: str,
+    _: dict[str, Any] = Depends(get_admin_payload),
+) -> dict[str, Any]:
+    with get_connection() as connection:
+        responses_by_resource_id = normalize_questionnaire_responses_map(
+            read_kv(connection, "questionnaire_responses_by_resource_id", {})
+        )
+        responses_by_resource_id.pop(resource_id, None)
+        write_kv(connection, "questionnaire_responses_by_resource_id", responses_by_resource_id)
+
+    return {"responses": []}
 
 
 @app.put("/api/appointment-state")

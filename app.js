@@ -1,5 +1,61 @@
 const importedPadlet = window.PADLET_RESOURCES ?? { resources: [] };
-const baseResources = importedPadlet.resources;
+const pilotQuestionnaireResource = {
+  id: "pilot-questionnaire-anonyme-ressources",
+  postNumber: 1001,
+  title: "Questionnaire anonyme sur les ressources du site",
+  section: "Votre section, vos expériences, vos partages",
+  category: "Expériences",
+  tagClass: "experience",
+  summary:
+    "Cinq questions anonymes pour mieux comprendre quelles ressources vous sont utiles et améliorer le site.",
+  body:
+    "Vos réponses aideront Audrey Fabre à améliorer les informations et les outils proposés aux patients et aux aidants.",
+  illustration: null,
+  attachment: null,
+  diseaseIds: ["huntington", "parkinson"],
+  importedComments: [],
+  format: "questionnaire",
+  questionnaire: {
+    questions: [
+      {
+        id: "profil",
+        prompt: "Vous consultez ce site en tant que :",
+        type: "single",
+        options: ["Patient ou patiente", "Aidant ou aidante", "Autre"],
+        required: true,
+      },
+      {
+        id: "comprehension",
+        prompt: "Les informations sont-elles faciles à comprendre ?",
+        type: "scale",
+        options: [],
+        required: true,
+      },
+      {
+        id: "recherche",
+        prompt: "Les fiches sont-elles faciles à trouver ?",
+        type: "scale",
+        options: [],
+        required: true,
+      },
+      {
+        id: "ressources-utiles",
+        prompt: "Quels thèmes ou quelles ressources vous sont les plus utiles ?",
+        type: "long",
+        options: [],
+        required: false,
+      },
+      {
+        id: "ameliorations",
+        prompt: "Que pourrions-nous améliorer sur ce site ?",
+        type: "long",
+        options: [],
+        required: false,
+      },
+    ],
+  },
+};
+const baseResources = [...importedPadlet.resources, pilotQuestionnaireResource];
 const apiBaseUrl = String(window.AUDREY_API_BASE_URL ?? "").replace(/\/+$/, "");
 const apiEnabled = Boolean(apiBaseUrl);
 const svgNamespace = "http://www.w3.org/2000/svg";
@@ -34,6 +90,7 @@ const storagePrefix = "audrey-orthophonie-comments-v2";
 const resourceStorageKey = "audrey-orthophonie-resources-v1";
 const appointmentStorageKey = "audrey-orthophonie-appointments-v1";
 const siteContentStorageKey = "audrey-orthophonie-site-content-v1";
+const questionnaireStorageKey = "audrey-orthophonie-questionnaire-responses-v1";
 const authStorageKey = "audrey-orthophonie-auth";
 const adminLogin = "audrey";
 const localAdminPasswordHash = "0e5a170ff0867a879d950b746ab6c1b741cbb413769c35e9647f1e5726a137a4";
@@ -56,6 +113,7 @@ const resourceSections = [
   "Autres ressources",
   "Votre section, vos expériences, vos partages",
 ];
+const alwaysVisibleResourceSections = ["Voix et parole"];
 const generatedPreviewBasePath = "assets/generated/";
 const generatedPreviewByResourceId = {
   "padlet-02-les-fonctions-executives": "executive-functions.jpg",
@@ -107,6 +165,7 @@ let siteContent = loadSiteContent();
 let resources = [];
 let resourcesById = {};
 let commentState = {};
+let questionnaireResponseState = loadQuestionnaireResponseState();
 let adminAuthToken = getStoredAdminToken();
 let isAdminLoggedIn = apiEnabled ? Boolean(adminAuthToken) : sessionStorage.getItem(authStorageKey) === "true";
 let activeDiseaseId = getInitialDiseaseId();
@@ -196,6 +255,9 @@ async function loadBackendState(options = {}) {
     appointmentState = normalizeAppointmentState(state.appointmentState);
     siteContent = normalizeSiteContent(state.siteContent);
     commentState = normalizeCommentStateMap(state.commentsByResourceId);
+    questionnaireResponseState = normalizeQuestionnaireResponseState(
+      state.questionnaireResponsesByResourceId,
+    );
     isAdminLoggedIn = Boolean(state.isAdmin);
 
     if (!isAdminLoggedIn && adminAuthToken) {
@@ -271,6 +333,39 @@ function normalizeCommentStateMap(commentsByResourceId) {
       Array.isArray(comments) ? comments.map(normalizeStoredComment).filter(Boolean) : [],
     ]),
   );
+}
+
+function normalizeQuestionnaireResponseState(value) {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).map(([resourceId, responses]) => [
+      resourceId,
+      Array.isArray(responses) ? responses.map(normalizeQuestionnaireResponse).filter(Boolean) : [],
+    ]),
+  );
+}
+
+function normalizeQuestionnaireResponse(response) {
+  if (!response || typeof response !== "object" || !Array.isArray(response.answers)) {
+    return null;
+  }
+
+  return {
+    id: String(response.id || createCommentId()),
+    createdAt: String(response.createdAt || ""),
+    answers: response.answers
+      .filter((answer) => answer && typeof answer === "object")
+      .map((answer) => ({
+        questionId: String(answer.questionId || ""),
+        prompt: String(answer.prompt || "Question"),
+        value: Array.isArray(answer.value)
+          ? answer.value.map((item) => String(item))
+          : String(answer.value ?? ""),
+      })),
+  };
 }
 
 function cloneJson(value) {
@@ -492,6 +587,20 @@ function loadEditableResourceState() {
   }
 }
 
+function loadQuestionnaireResponseState() {
+  try {
+    return normalizeQuestionnaireResponseState(
+      JSON.parse(localStorage.getItem(questionnaireStorageKey) || "{}"),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function saveQuestionnaireResponseStateLocally() {
+  localStorage.setItem(questionnaireStorageKey, JSON.stringify(questionnaireResponseState));
+}
+
 function saveEditableResourceState() {
   localStorage.setItem(resourceStorageKey, JSON.stringify(editableResourceState));
 }
@@ -541,6 +650,7 @@ function normalizeEditableResource(resource) {
     ? validDiseaseIds
     : [diseases.some((disease) => disease.id === activeDiseaseId) ? activeDiseaseId : diseases[0].id];
   const section = resource.section || resourceSections[0];
+  const format = resource.format === "questionnaire" ? "questionnaire" : "standard";
 
   return {
     ...resource,
@@ -555,6 +665,40 @@ function normalizeEditableResource(resource) {
     diseaseIds,
     importedComments: resource.importedComments ?? [],
     isHidden: Boolean(resource.isHidden),
+    format,
+    questionnaire: normalizeQuestionnaireDefinition(resource.questionnaire),
+  };
+}
+
+function normalizeQuestionnaireDefinition(value) {
+  const questions = Array.isArray(value?.questions)
+    ? value.questions.map(normalizeQuestionnaireQuestion).filter(Boolean)
+    : [];
+  return { questions };
+}
+
+function normalizeQuestionnaireQuestion(question, index) {
+  if (!question || typeof question !== "object") {
+    return null;
+  }
+
+  const prompt = String(question.prompt || "").trim();
+  if (!prompt) {
+    return null;
+  }
+
+  const allowedTypes = new Set(["short", "long", "single", "scale"]);
+  const type = allowedTypes.has(question.type) ? question.type : "short";
+  const options = type === "single" && Array.isArray(question.options)
+    ? question.options.map((option) => String(option).trim()).filter(Boolean)
+    : [];
+
+  return {
+    id: String(question.id || `question-${index + 1}`),
+    prompt,
+    type,
+    options,
+    required: Boolean(question.required),
   };
 }
 
@@ -1010,6 +1154,9 @@ function getFilteredDiseaseResources(resourcesForDisease) {
       resource.category,
       resource.summary,
       resource.body,
+      resource.questionnaire?.questions
+        ?.flatMap((question) => [question.prompt, ...(question.options ?? [])])
+        .join(" "),
       resource.attachment?.label,
       resource.attachment?.url,
     ].filter(Boolean).join(" "));
@@ -1036,7 +1183,14 @@ function createResourceThemeSection(theme, themeResources) {
 
   const list = document.createElement("div");
   list.className = "resource-theme-list";
-  list.append(...themeResources.map((resource) => createResourceCard(resource)));
+  if (themeResources.length > 0) {
+    list.append(...themeResources.map((resource) => createResourceCard(resource)));
+  } else {
+    const empty = document.createElement("p");
+    empty.className = "resource-theme-empty";
+    empty.textContent = "Aucune fiche dans ce thème pour le moment.";
+    list.append(empty);
+  }
 
   section.append(header, list);
   return section;
@@ -1057,13 +1211,20 @@ function groupResourcesByTheme(resourcesToGroup) {
     grouped.get(resource.section).push(resource);
   });
 
-  return [...grouped.entries()].filter(([, themeResources]) => themeResources.length > 0);
+  const showEmptySections = !resourceSearchQuery.trim() && activeThemeFilter === "all";
+  return [...grouped.entries()].filter(
+    ([theme, themeResources]) =>
+      themeResources.length > 0 || (showEmptySections && alwaysVisibleResourceSections.includes(theme)),
+  );
 }
 
 function getResourceThemes(resourcesForDisease) {
-  return [...new Set(resourcesForDisease.map((resource) => resource.section || resourceSections[0]))].sort(
-    compareResourceThemes,
-  );
+  return [
+    ...new Set([
+      ...resourcesForDisease.map((resource) => resource.section || resourceSections[0]),
+      ...alwaysVisibleResourceSections,
+    ]),
+  ].sort(compareResourceThemes);
 }
 
 function compareResourceThemes(first, second) {
@@ -2148,6 +2309,9 @@ function openLoginDialog() {
 function logoutAdmin() {
   isAdminLoggedIn = false;
   adminAuthToken = "";
+  if (apiEnabled) {
+    questionnaireResponseState = {};
+  }
   sessionStorage.removeItem(authStorageKey);
   resetViewAfterSessionChange();
 }
@@ -2183,6 +2347,8 @@ function createDraftResource() {
     attachment: null,
     diseaseIds: [diseases.some((disease) => disease.id === activeDiseaseId) ? activeDiseaseId : diseases[0].id],
     importedComments: [],
+    format: "standard",
+    questionnaire: { questions: [] },
   });
 }
 
@@ -2204,6 +2370,16 @@ function createResourceForm(resource, options = {}) {
     required: "true",
   });
 
+  const formatField = createSelectLabel(
+    "Format de la fiche",
+    "format",
+    [
+      { value: "standard", label: "Fiche de ressource" },
+      { value: "questionnaire", label: "Questionnaire anonyme" },
+    ],
+    resource.format,
+  );
+
   const sectionField = createThemeFields(resource.section);
 
   const diseasesField = createDiseaseCheckboxes(resource.diseaseIds);
@@ -2223,6 +2399,18 @@ function createResourceForm(resource, options = {}) {
   });
   bodyField.querySelector("textarea").value = resource.body ?? "";
 
+  const questionnaireField = createQuestionnaireEditor(resource.questionnaire);
+  const formatSelect = formatField.querySelector("select");
+  const updateFormatFields = () => {
+    const isQuestionnaire = formatSelect.value === "questionnaire";
+    questionnaireField.hidden = !isQuestionnaire;
+    bodyField.querySelector("span").textContent = isQuestionnaire
+      ? "Texte d'introduction du questionnaire"
+      : "Contenu complet de la fiche";
+  };
+  formatSelect.addEventListener("change", updateFormatFields);
+  updateFormatFields();
+
   const illustrationField = createIllustrationFields(resource, { isNew });
   const attachmentField = createAttachmentFields(resource, { isNew });
   const error = document.createElement("p");
@@ -2236,12 +2424,14 @@ function createResourceForm(resource, options = {}) {
   form.append(
     intro,
     titleField,
+    formatField,
     sectionField,
     diseasesField,
     visibilityField,
     summaryField,
     illustrationField,
     bodyField,
+    questionnaireField,
     attachmentField,
     error,
     actions,
@@ -2282,6 +2472,106 @@ function createResourceForm(resource, options = {}) {
   });
 
   return form;
+}
+
+function createQuestionnaireEditor(questionnaire) {
+  const fieldset = document.createElement("fieldset");
+  fieldset.className = "admin-fieldset questionnaire-editor";
+
+  const legend = document.createElement("legend");
+  legend.textContent = "Questions";
+
+  const help = document.createElement("p");
+  help.className = "admin-help";
+  help.textContent =
+    "Le questionnaire public ne demandera ni nom ni coordonnées. Évitez toute question permettant d'identifier une personne.";
+
+  const list = document.createElement("div");
+  list.className = "question-editor-list";
+  normalizeQuestionnaireDefinition(questionnaire).questions.forEach((question) => {
+    list.append(createQuestionEditorItem(question));
+  });
+
+  const addButton = document.createElement("button");
+  addButton.className = "admin-button questionnaire-add-question";
+  addButton.type = "button";
+  addButton.textContent = "Ajouter une question";
+  addButton.addEventListener("click", () => {
+    const item = createQuestionEditorItem({
+      id: createCommentId(),
+      prompt: "Nouvelle question",
+      type: "short",
+      options: [],
+      required: false,
+    });
+    list.append(item);
+    item.querySelector('[data-question-field="prompt"]')?.focus();
+  });
+
+  fieldset.append(legend, help, list, addButton);
+  return fieldset;
+}
+
+function createQuestionEditorItem(question) {
+  const normalized = normalizeQuestionnaireQuestion(question, 0);
+  const item = document.createElement("article");
+  item.className = "question-editor-item";
+  item.dataset.questionId = normalized.id;
+
+  const promptField = createFieldLabel("Question", "input", {
+    type: "text",
+    value: normalized.prompt,
+    maxlength: "500",
+    "data-question-field": "prompt",
+  });
+
+  const typeField = createSelectLabel(
+    "Type de réponse",
+    "",
+    [
+      { value: "short", label: "Réponse courte" },
+      { value: "long", label: "Réponse longue" },
+      { value: "single", label: "Choix unique" },
+      { value: "scale", label: "Échelle de 1 à 5" },
+    ],
+    normalized.type,
+  );
+  const typeSelect = typeField.querySelector("select");
+  typeSelect.removeAttribute("name");
+  typeSelect.dataset.questionField = "type";
+
+  const optionsField = createFieldLabel("Choix proposés, un par ligne", "textarea", {
+    rows: "4",
+    "data-question-field": "options",
+    placeholder: "Premier choix\nDeuxième choix",
+  });
+  optionsField.classList.add("question-options-field");
+  optionsField.querySelector("textarea").value = normalized.options.join("\n");
+
+  const requiredLabel = document.createElement("label");
+  requiredLabel.className = "admin-checkbox";
+  const requiredInput = document.createElement("input");
+  requiredInput.type = "checkbox";
+  requiredInput.checked = normalized.required;
+  requiredInput.dataset.questionField = "required";
+  const requiredText = document.createElement("span");
+  requiredText.textContent = "Réponse obligatoire";
+  requiredLabel.append(requiredInput, requiredText);
+
+  const remove = document.createElement("button");
+  remove.className = "admin-button question-remove-button";
+  remove.type = "button";
+  remove.textContent = "Supprimer cette question";
+  remove.addEventListener("click", () => item.remove());
+
+  const updateOptionsVisibility = () => {
+    optionsField.hidden = typeSelect.value !== "single";
+  };
+  typeSelect.addEventListener("change", updateOptionsVisibility);
+  updateOptionsVisibility();
+
+  item.append(promptField, typeField, optionsField, requiredLabel, remove);
+  return item;
 }
 
 function createThemeFields(selectedTheme) {
@@ -2569,6 +2859,9 @@ async function readResourceForm(form, originalResource, options = {}) {
   const { isNew = false } = options;
   const formData = new FormData(form);
   const title = String(formData.get("title") ?? "").trim();
+  const format = String(formData.get("format") ?? "standard") === "questionnaire"
+    ? "questionnaire"
+    : "standard";
   const selectedSection = String(formData.get("section") ?? "").trim();
   const requestedNewSection = String(formData.get("newSection") ?? "").trim();
   const section = selectedSection === newThemeOptionValue
@@ -2593,6 +2886,11 @@ async function readResourceForm(form, originalResource, options = {}) {
 
   if (diseaseIds.length === 0) {
     return { ok: false, message: "Sélectionnez au moins une pathologie." };
+  }
+
+  const questionnaireResult = readQuestionnaireEditor(form, format);
+  if (!questionnaireResult.ok) {
+    return questionnaireResult;
   }
 
   if (attachmentMode === "replace-link" && !attachmentUrl) {
@@ -2666,8 +2964,52 @@ async function readResourceForm(form, originalResource, options = {}) {
       updatedAt: new Date().toISOString(),
       importedComments: originalResource.importedComments ?? [],
       isHidden,
+      format,
+      questionnaire: questionnaireResult.questionnaire,
     }),
   };
+}
+
+function readQuestionnaireEditor(form, format) {
+  if (format !== "questionnaire") {
+    return { ok: true, questionnaire: { questions: [] } };
+  }
+
+  const items = [...form.querySelectorAll(".question-editor-item")];
+  if (items.length === 0) {
+    return { ok: false, message: "Ajoutez au moins une question au questionnaire." };
+  }
+
+  const questions = [];
+  for (const [index, item] of items.entries()) {
+    const prompt = item.querySelector('[data-question-field="prompt"]')?.value.trim() || "";
+    const type = item.querySelector('[data-question-field="type"]')?.value || "short";
+    const options = (item.querySelector('[data-question-field="options"]')?.value || "")
+      .split("\n")
+      .map((option) => option.trim())
+      .filter(Boolean);
+
+    if (!prompt) {
+      return { ok: false, message: `Renseignez le texte de la question ${index + 1}.` };
+    }
+
+    if (type === "single" && options.length < 2) {
+      return {
+        ok: false,
+        message: `Ajoutez au moins deux choix à la question ${index + 1}.`,
+      };
+    }
+
+    questions.push({
+      id: item.dataset.questionId || createCommentId(),
+      prompt,
+      type,
+      options: type === "single" ? options : [],
+      required: Boolean(item.querySelector('[data-question-field="required"]')?.checked),
+    });
+  }
+
+  return { ok: true, questionnaire: { questions } };
 }
 
 function getCanonicalThemeName(themeName) {
@@ -2897,6 +3239,10 @@ async function deleteResource(resourceId) {
         auth: true,
         body: { comments: [] },
       });
+      await apiRequest(`/api/questionnaires/${encodeURIComponent(resourceId)}/responses`, {
+        method: "DELETE",
+        auth: true,
+      }).catch(() => null);
       await loadBackendState({ silent: true });
     } catch (error) {
       editableResourceState = previousState;
@@ -2904,6 +3250,8 @@ async function deleteResource(resourceId) {
     }
   } else {
     localStorage.removeItem(getStorageKey(resourceId));
+    delete questionnaireResponseState[resourceId];
+    saveQuestionnaireResponseStateLocally();
     saveEditableResourceState();
   }
 
@@ -2929,6 +3277,8 @@ function extractEditableResourceFields(resource) {
     illustration: resource.illustration,
     attachment: resource.attachment,
     updatedAt: resource.updatedAt,
+    format: resource.format,
+    questionnaire: resource.questionnaire,
   };
 }
 
@@ -3003,7 +3353,7 @@ function createResourceCard(resource) {
   card.setAttribute("role", "button");
   card.setAttribute(
     "aria-label",
-    `Ouvrir ${resource.title}, ${formatCommentCount(commentCount)}${
+    `${resource.format === "questionnaire" ? "Répondre à" : "Ouvrir"} ${resource.title}, ${formatCommentCount(commentCount)}${
       isAdminLoggedIn && pendingCommentCount > 0 ? `, ${formatPendingCommentCount(pendingCommentCount)}` : ""
     }${resource.isHidden ? ", fiche masquée" : ""}`,
   );
@@ -3047,6 +3397,13 @@ function createResourceCard(resource) {
 
   topline.append(title, tag);
 
+  if (resource.format === "questionnaire") {
+    const formatBadge = document.createElement("span");
+    formatBadge.className = "questionnaire-format-badge";
+    formatBadge.textContent = "Questionnaire anonyme";
+    topline.append(formatBadge);
+  }
+
   if (resource.isHidden && isAdminLoggedIn) {
     const hiddenBadge = document.createElement("span");
     hiddenBadge.className = "hidden-resource-badge";
@@ -3076,7 +3433,7 @@ function createResourceCard(resource) {
 
   const hint = document.createElement("p");
   hint.className = "card-open-hint";
-  hint.textContent = "Ouvrir la fiche";
+  hint.textContent = resource.format === "questionnaire" ? "Répondre au questionnaire" : "Ouvrir la fiche";
 
   const commentBadge = document.createElement("p");
   commentBadge.className = "card-comment-count";
@@ -3789,6 +4146,13 @@ function openResourceModal(resourceId) {
 
   titleBlock.append(tag);
 
+  if (resource.format === "questionnaire") {
+    const formatBadge = document.createElement("span");
+    formatBadge.className = "questionnaire-format-badge";
+    formatBadge.textContent = "Questionnaire anonyme";
+    titleBlock.append(formatBadge);
+  }
+
   if (resource.isHidden && isAdminLoggedIn) {
     const hiddenBadge = document.createElement("span");
     hiddenBadge.className = "hidden-resource-badge";
@@ -3802,6 +4166,9 @@ function openResourceModal(resourceId) {
 
   const body = document.createElement("div");
   body.className = "modal-body";
+  if (resource.format === "questionnaire") {
+    body.classList.add("is-questionnaire-modal-body");
+  }
 
   const content = document.createElement("section");
   content.className = "modal-text";
@@ -3825,7 +4192,11 @@ function openResourceModal(resourceId) {
 
   const shell = document.createElement("div");
   shell.className = "modal-shell";
-  shell.append(header, body, commentsSlot);
+  shell.append(header, body);
+  if (resource.format === "questionnaire") {
+    shell.append(createQuestionnairePanel(resource));
+  }
+  shell.append(commentsSlot);
 
   modal.append(shell);
   document.body.append(modal);
@@ -3837,6 +4208,284 @@ function openResourceModal(resourceId) {
   updateViewerMenuOffset();
   window.addEventListener("resize", updateViewerMenuOffset);
   closeButton.focus();
+}
+
+function createQuestionnairePanel(resource) {
+  const panel = document.createElement("section");
+  panel.className = "questionnaire-panel";
+  panel.setAttribute("aria-labelledby", "questionnairePanelTitle");
+
+  const heading = document.createElement("div");
+  heading.className = "questionnaire-heading";
+
+  const title = document.createElement("h3");
+  title.id = "questionnairePanelTitle";
+  title.textContent = isAdminLoggedIn ? "Réponses au questionnaire" : "Questionnaire anonyme";
+
+  const privacy = document.createElement("p");
+  privacy.textContent = isAdminLoggedIn
+    ? "Les réponses ci-dessous ne comportent ni nom ni coordonnées."
+    : "Aucun nom, numéro de téléphone ou courriel n'est demandé. Ne donnez pas d'information permettant de vous identifier dans les réponses libres.";
+
+  heading.append(title, privacy);
+  panel.append(heading);
+
+  if (isAdminLoggedIn) {
+    panel.append(createQuestionnaireAdminResults(resource));
+  } else {
+    panel.append(createQuestionnaireResponseForm(resource));
+  }
+
+  return panel;
+}
+
+function createQuestionnaireResponseForm(resource) {
+  const form = document.createElement("form");
+  form.className = "questionnaire-response-form";
+  const questions = resource.questionnaire.questions;
+
+  questions.forEach((question, index) => {
+    form.append(createPublicQuestionField(question, index));
+  });
+
+  const notice = document.createElement("p");
+  notice.className = "questionnaire-notice";
+  notice.hidden = true;
+  notice.setAttribute("role", "status");
+  notice.tabIndex = -1;
+
+  const submit = document.createElement("button");
+  submit.className = "questionnaire-submit";
+  submit.type = "submit";
+  submit.textContent = "Envoyer mes réponses";
+
+  form.append(notice, submit);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    notice.hidden = true;
+    const answers = readQuestionnaireAnswers(form, questions);
+    const stopLoading = startLoading("Envoi des réponses...");
+    const stopSubmitLoading = setControlLoading(submit, "Envoi...");
+
+    try {
+      if (apiEnabled) {
+        await apiRequest(`/api/questionnaires/${encodeURIComponent(resource.id)}/responses`, {
+          method: "POST",
+          body: { answers },
+        });
+      } else {
+        const response = normalizeQuestionnaireResponse({
+          id: createCommentId(),
+          createdAt: new Date().toISOString(),
+          answers,
+        });
+        questionnaireResponseState[resource.id] = [
+          response,
+          ...(questionnaireResponseState[resource.id] ?? []),
+        ];
+        saveQuestionnaireResponseStateLocally();
+      }
+
+      form.reset();
+      notice.className = "questionnaire-notice is-success";
+      notice.textContent = "Merci. Vos réponses anonymes ont bien été envoyées.";
+      notice.hidden = false;
+      notice.focus({ preventScroll: true });
+    } catch {
+      notice.className = "questionnaire-notice is-error";
+      notice.textContent = "L'envoi a échoué. Vérifiez votre connexion puis réessayez.";
+      notice.hidden = false;
+    } finally {
+      stopSubmitLoading();
+      stopLoading();
+    }
+  });
+
+  return form;
+}
+
+function createPublicQuestionField(question, index) {
+  const fieldset = document.createElement("fieldset");
+  fieldset.className = "questionnaire-question";
+  fieldset.dataset.questionId = question.id;
+
+  const legend = document.createElement("legend");
+  legend.textContent = `${index + 1}. ${question.prompt}${question.required ? " *" : ""}`;
+  fieldset.append(legend);
+
+  if (question.type === "single") {
+    const choices = document.createElement("div");
+    choices.className = "questionnaire-choices";
+    question.options.forEach((option, optionIndex) => {
+      const label = document.createElement("label");
+      const input = document.createElement("input");
+      input.type = "radio";
+      input.name = `question-${question.id}`;
+      input.value = option;
+      input.required = question.required && optionIndex === 0;
+      const text = document.createElement("span");
+      text.textContent = option;
+      label.append(input, text);
+      choices.append(label);
+    });
+    fieldset.append(choices);
+    return fieldset;
+  }
+
+  if (question.type === "scale") {
+    const scale = document.createElement("div");
+    scale.className = "questionnaire-scale";
+    for (let value = 1; value <= 5; value += 1) {
+      const label = document.createElement("label");
+      const input = document.createElement("input");
+      input.type = "radio";
+      input.name = `question-${question.id}`;
+      input.value = String(value);
+      input.required = question.required && value === 1;
+      const text = document.createElement("span");
+      text.textContent = String(value);
+      label.append(input, text);
+      scale.append(label);
+    }
+    const scaleHelp = document.createElement("p");
+    scaleHelp.className = "questionnaire-scale-help";
+    scaleHelp.innerHTML = "<span>1 : Pas du tout</span><span>5 : Tout à fait</span>";
+    fieldset.append(scale, scaleHelp);
+    return fieldset;
+  }
+
+  const input = document.createElement(question.type === "long" ? "textarea" : "input");
+  input.name = `question-${question.id}`;
+  input.required = question.required;
+  input.maxLength = question.type === "long" ? 4000 : 500;
+  if (question.type === "long") {
+    input.rows = 5;
+  } else {
+    input.type = "text";
+  }
+  fieldset.append(input);
+  return fieldset;
+}
+
+function readQuestionnaireAnswers(form, questions) {
+  return questions.flatMap((question) => {
+    const field = form.elements.namedItem(`question-${question.id}`);
+    let value = "";
+
+    if (field instanceof RadioNodeList) {
+      value = field.value;
+    } else if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
+      value = field.value.trim();
+    }
+
+    return value
+      ? [{ questionId: question.id, prompt: question.prompt, value }]
+      : [];
+  });
+}
+
+function createQuestionnaireAdminResults(resource) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "questionnaire-results";
+  const responses = questionnaireResponseState[resource.id] ?? [];
+
+  const count = document.createElement("p");
+  count.className = "questionnaire-response-count";
+  count.textContent = `${responses.length} ${responses.length > 1 ? "réponses anonymes" : "réponse anonyme"}`;
+  wrapper.append(count);
+
+  if (responses.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "questionnaire-results-empty";
+    empty.textContent = "Aucune réponse pour le moment.";
+    wrapper.append(empty);
+    return wrapper;
+  }
+
+  responses.forEach((response, index) => {
+    const item = document.createElement("article");
+    item.className = "questionnaire-response-item";
+
+    const itemHeader = document.createElement("div");
+    itemHeader.className = "questionnaire-response-header";
+    const itemTitle = document.createElement("h4");
+    itemTitle.textContent = `Réponse ${responses.length - index}`;
+    const date = document.createElement("p");
+    date.textContent = response.createdAt ? formatDate(response.createdAt) : "Date non disponible";
+    itemHeader.append(itemTitle, date);
+
+    const answers = document.createElement("dl");
+    response.answers.forEach((answer) => {
+      const question = document.createElement("dt");
+      question.textContent = answer.prompt;
+      const value = document.createElement("dd");
+      const currentQuestion = resource.questionnaire.questions.find(
+        (itemQuestion) => itemQuestion.id === answer.questionId,
+      );
+      value.textContent = currentQuestion?.type === "scale"
+        ? `${String(answer.value)} sur 5`
+        : Array.isArray(answer.value)
+          ? answer.value.join(", ")
+          : String(answer.value);
+      answers.append(question, value);
+    });
+
+    const remove = document.createElement("button");
+    remove.className = "admin-button admin-danger-button questionnaire-delete-response";
+    remove.type = "button";
+    remove.textContent = "Supprimer cette réponse";
+    remove.addEventListener("click", async () => {
+      if (!window.confirm("Supprimer définitivement cette réponse anonyme ?")) {
+        return;
+      }
+      await deleteQuestionnaireResponse(resource.id, response.id, remove);
+    });
+
+    item.append(itemHeader, answers, remove);
+    wrapper.append(item);
+  });
+
+  return wrapper;
+}
+
+async function deleteQuestionnaireResponse(resourceId, responseId, control) {
+  const stopLoading = startLoading("Suppression de la réponse...");
+  const stopControlLoading = setControlLoading(control, "Suppression...");
+
+  try {
+    if (apiEnabled) {
+      const result = await apiRequest(
+        `/api/questionnaires/${encodeURIComponent(resourceId)}/responses/${encodeURIComponent(responseId)}`,
+        { method: "DELETE", auth: true },
+      );
+      questionnaireResponseState[resourceId] = (result.responses ?? [])
+        .map(normalizeQuestionnaireResponse)
+        .filter(Boolean);
+    } else {
+      questionnaireResponseState[resourceId] = (questionnaireResponseState[resourceId] ?? [])
+        .filter((response) => response.id !== responseId);
+      saveQuestionnaireResponseStateLocally();
+    }
+
+    refreshQuestionnairePanel(resourceId);
+  } catch {
+    window.alert("La réponse n'a pas pu être supprimée. Vérifiez la connexion puis réessayez.");
+  } finally {
+    stopControlLoading();
+    stopLoading();
+  }
+}
+
+function refreshQuestionnairePanel(resourceId) {
+  if (!activeModal || activeModal.dataset.resourceId !== resourceId) {
+    return;
+  }
+
+  const resource = resourcesById[resourceId];
+  const panel = activeModal.querySelector(".questionnaire-panel");
+  if (resource && panel) {
+    panel.replaceWith(createQuestionnairePanel(resource));
+  }
 }
 
 function closeResourceModal(options = {}) {
