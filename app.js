@@ -1303,28 +1303,6 @@ function renderAppointmentPanel() {
   const shell = document.createElement("div");
   shell.className = "appointment-shell";
 
-  const header = document.createElement("section");
-  header.className = "appointment-heading";
-
-  const title = document.createElement("h2");
-  title.textContent = "Prise de rendez-vous";
-
-  const text = document.createElement("p");
-  text.textContent = isAdminLoggedIn
-    ? "Gérez les demandes de rendez-vous et les disponibilités proposées aux patients."
-    : "Choisissez un créneau disponible. La demande sera confirmée après validation par Audrey Fabre.";
-
-  header.append(title, text);
-
-  if (appointmentNotice) {
-    const notice = document.createElement("p");
-    notice.className = "appointment-notice";
-    notice.textContent = appointmentNotice;
-    header.append(notice);
-  }
-
-  shell.append(header);
-
   if (isAdminLoggedIn) {
     shell.append(createAppointmentAdminPanel());
   }
@@ -1634,9 +1612,16 @@ function createAppointmentCalendar() {
   help.className = "appointment-help";
   help.textContent = isAdminLoggedIn
     ? "Vue des créneaux proposés aux patients."
-    : "Les créneaux indisponibles ou déjà demandés ne peuvent pas être sélectionnés.";
+    : "Choisissez un créneau disponible. La demande sera confirmée après validation par Audrey Fabre. Les créneaux indisponibles ou déjà demandés ne peuvent pas être sélectionnés.";
 
   section.append(title, help);
+
+  if (appointmentNotice) {
+    const notice = document.createElement("p");
+    notice.className = "appointment-notice";
+    notice.textContent = appointmentNotice;
+    section.append(notice);
+  }
 
   const slots = getFutureAppointmentSlots();
   if (slots.length === 0) {

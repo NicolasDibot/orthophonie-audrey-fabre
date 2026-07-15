@@ -1920,7 +1920,6 @@ body.modal-open .admin-pending-indicator {
   gap: 22px;
 }
 
-.appointment-heading,
 .appointment-calendar,
 .appointment-admin-panel,
 .appointment-admin-card,
@@ -1932,17 +1931,11 @@ body.modal-open .admin-pending-indicator {
   background: #fff;
 }
 
-.appointment-heading {
-  padding: clamp(20px, 2vw, 30px);
-}
-
-.appointment-heading h2,
 .appointment-calendar h2,
 .appointment-admin-panel > h2 {
   font-size: clamp(2rem, 3vw, 3rem);
 }
 
-.appointment-heading p,
 .appointment-help {
   max-width: 980px;
   margin: 12px 0 0;
@@ -2405,8 +2398,7 @@ body.modal-open .modal-shell {
   }
 
   .appointment-calendar,
-  .appointment-admin-panel,
-  .appointment-heading {
+  .appointment-admin-panel {
     padding: 16px;
   }
 
