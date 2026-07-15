@@ -1620,6 +1620,19 @@ body.modal-open .header-copy {
   white-space: pre-line;
 }
 
+.data-safety-notice {
+  max-width: 1000px;
+  margin: 24px 0 0;
+  border: 2px solid #a36b0a;
+  border-radius: 8px;
+  padding: 14px 16px;
+  color: #4f3507;
+  background: #fff7df;
+  font-size: 1.12rem;
+  font-weight: 850;
+  line-height: 1.5;
+}
+
 .home-edit-button {
   margin-top: 28px;
 }
@@ -1727,6 +1740,89 @@ body.modal-open .header-copy {
   border: 2px solid #9b3148;
   color: #7c2235;
   background: #fff4f6;
+}
+
+.contact-inbox {
+  max-width: 1100px;
+  margin-top: 30px;
+}
+
+.contact-inbox-count,
+.contact-inbox-empty {
+  margin: 0;
+  border: 2px solid var(--line);
+  border-radius: 8px;
+  padding: 14px 16px;
+  color: #334148;
+  background: var(--surface-soft);
+  font-size: 1.15rem;
+  font-weight: 850;
+}
+
+.contact-message-list {
+  display: grid;
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.contact-message-item {
+  display: grid;
+  gap: 12px;
+  border: 2px solid var(--line);
+  border-radius: 8px;
+  padding: clamp(16px, 2vw, 24px);
+  background: #fff;
+}
+
+.contact-message-item header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: start;
+  justify-content: space-between;
+  gap: 10px 20px;
+}
+
+.contact-message-item h3,
+.contact-message-item p {
+  margin: 0;
+}
+
+.contact-message-item h3 {
+  font-size: 1.45rem;
+}
+
+.contact-message-item p {
+  color: #334148;
+  font-size: 1.08rem;
+  line-height: 1.5;
+}
+
+.contact-message-body {
+  border-left: 5px solid var(--teal);
+  padding: 10px 14px;
+  background: var(--surface-soft);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.contact-message-date {
+  font-weight: 800;
+}
+
+.contact-delivery-status {
+  border: 2px solid #35705b;
+  border-radius: 8px;
+  padding: 6px 9px;
+  color: #244f40;
+  background: #eaf6f0;
+  font-size: 0.96rem;
+  font-weight: 850;
+}
+
+.contact-delivery-status.is-stored {
+  border-color: #a36b0a;
+  color: #4f3507;
+  background: #fff7df;
 }
 
 @media (max-width: 700px) {
@@ -2034,9 +2130,38 @@ body.modal-open .admin-pending-indicator {
   outline-offset: 2px;
 }
 
+.appointment-attachment-button {
+  min-height: 44px;
+  border: 2px solid var(--teal-dark);
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: var(--teal-dark);
+  background: #fff;
+  font: inherit;
+  font-weight: 850;
+  text-align: left;
+}
+
+.appointment-attachment-button:hover,
+.appointment-attachment-button:focus-visible {
+  background: #edf8f5;
+  outline: 4px solid rgba(255, 191, 71, 0.72);
+  outline-offset: 2px;
+}
+
 .appointment-request-pending {
   border-color: #d2a446;
   background: #fff8e6;
+}
+
+.appointment-request-declined {
+  border-color: #9b7b82;
+  background: #f7f1f2;
+}
+
+.appointment-request-item.is-past-request {
+  border-color: #7b8589;
+  background: #f1f2ef;
 }
 
 .appointment-actions {

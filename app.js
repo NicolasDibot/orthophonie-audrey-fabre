@@ -92,9 +92,30 @@ const appointmentStorageKey = "audrey-orthophonie-appointments-v1";
 const siteContentStorageKey = "audrey-orthophonie-site-content-v1";
 const questionnaireStorageKey = "audrey-orthophonie-questionnaire-responses-v1";
 const authStorageKey = "audrey-orthophonie-auth";
-const adminLogin = "audrey";
-const localAdminPasswordHash = "0e5a170ff0867a879d950b746ab6c1b741cbb413769c35e9647f1e5726a137a4";
 const maxLocalAttachmentBytes = 3 * 1024 * 1024;
+const supportedUploadTypes = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "text/plain",
+  "video/mp4",
+  "video/webm",
+  "video/quicktime",
+]);
+const supportedIllustrationTypes = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+]);
 const newThemeOptionValue = "__new_theme__";
 const defaultSiteContent = {
   homeTitle: "Bienvenue sur L'orthophonie au quotidien",
@@ -171,8 +192,9 @@ let resources = [];
 let resourcesById = {};
 let commentState = {};
 let questionnaireResponseState = loadQuestionnaireResponseState();
+let contactMessageState = [];
 let adminAuthToken = getStoredAdminToken();
-let isAdminLoggedIn = apiEnabled ? Boolean(adminAuthToken) : sessionStorage.getItem(authStorageKey) === "true";
+let isAdminLoggedIn = apiEnabled && Boolean(adminAuthToken);
 let activeDiseaseId = getInitialDiseaseId();
 let activeModal = null;
 let activeAdminDialog = null;
@@ -203,6 +225,7 @@ window.addEventListener("hashchange", () => {
     activeDiseaseId = nextId;
     renderTabs();
     renderDisease();
+    revealActivePage();
   }
 });
 
@@ -263,6 +286,7 @@ async function loadBackendState(options = {}) {
     questionnaireResponseState = normalizeQuestionnaireResponseState(
       state.questionnaireResponsesByResourceId,
     );
+    contactMessageState = normalizeContactMessageState(state.contactMessages);
     isAdminLoggedIn = Boolean(state.isAdmin);
 
     if (!isAdminLoggedIn && adminAuthToken) {
@@ -312,10 +336,38 @@ async function apiRequest(path, options = {}) {
   if (!response.ok) {
     const error = new Error(`API ${response.status}`);
     error.status = response.status;
+    try {
+      const payload = await response.json();
+      error.detail = payload?.detail || "";
+    } catch {
+      error.detail = "";
+    }
     throw error;
   }
 
   return response.status === 204 ? null : response.json();
+}
+
+async function apiRequestRaw(path, options = {}) {
+  const { auth = false } = options;
+  const apiUrl = new URL(apiBaseUrl);
+  const requestUrl = new URL(path, `${apiBaseUrl}/`);
+  if (requestUrl.origin !== apiUrl.origin) {
+    throw new Error("Adresse de fichier non autorisée");
+  }
+
+  const headers = {};
+  if (auth && adminAuthToken) {
+    headers.Authorization = `Bearer ${adminAuthToken}`;
+  }
+
+  const response = await fetch(requestUrl, { headers });
+  if (!response.ok) {
+    const error = new Error(`API ${response.status}`);
+    error.status = response.status;
+    throw error;
+  }
+  return response;
 }
 
 function normalizeEditableResourceState(state) {
@@ -351,6 +403,24 @@ function normalizeQuestionnaireResponseState(value) {
       Array.isArray(responses) ? responses.map(normalizeQuestionnaireResponse).filter(Boolean) : [],
     ]),
   );
+}
+
+function normalizeContactMessageState(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((message) => message && typeof message === "object" && message.id)
+    .map((message) => ({
+      id: String(message.id),
+      name: String(message.name ?? "").trim() || "Nom non renseigné",
+      email: String(message.email ?? "").trim(),
+      subject: String(message.subject ?? "").trim() || "Sans objet",
+      message: String(message.message ?? "").trim(),
+      createdAt: String(message.createdAt ?? ""),
+      deliveryStatus: message.deliveryStatus === "sent" ? "sent" : "stored",
+    }));
 }
 
 function normalizeQuestionnaireResponse(response) {
@@ -462,20 +532,6 @@ function setFormLoading(form, loadingText = "") {
   return setControlLoading(form.querySelector('button[type="submit"]'), loadingText);
 }
 
-async function verifyLocalAdminPassword(password) {
-  if (!globalThis.crypto?.subtle) {
-    return false;
-  }
-
-  const encoded = new TextEncoder().encode(password);
-  const digest = await globalThis.crypto.subtle.digest("SHA-256", encoded);
-  const hash = [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-
-  return hash === localAdminPasswordHash;
-}
-
 function setupSiteTitleNavigation() {
   if (!siteTitleNode) {
     return;
@@ -490,6 +546,15 @@ function setupSiteTitleNavigation() {
       event.preventDefault();
       returnToMainPage();
     }
+  });
+}
+
+function revealActivePage() {
+  panelNode.tabIndex = -1;
+  panelNode.focus({ preventScroll: true });
+  panelNode.scrollIntoView({
+    behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+    block: "start",
   });
 }
 
@@ -756,7 +821,11 @@ function renderTabs() {
           closeResourceModal({ restoreFocus: false });
         }
 
-        window.location.hash = tab.id;
+        if (window.location.hash === `#${tab.id}`) {
+          revealActivePage();
+        } else {
+          window.location.hash = tab.id;
+        }
       });
       return button;
     }),
@@ -803,6 +872,14 @@ function renderAdminControls() {
     window.location.hash = appointmentTab.id;
   });
 
+  const contactIndicator = document.createElement("button");
+  contactIndicator.className = "admin-pending-indicator contact-admin-indicator";
+  contactIndicator.type = "button";
+  contactIndicator.textContent = formatContactMessageCount(contactMessageState.length);
+  contactIndicator.addEventListener("click", () => {
+    window.location.hash = contactTab.id;
+  });
+
   const createButton = document.createElement("button");
   createButton.className = "admin-button admin-button-primary";
   createButton.type = "button";
@@ -815,7 +892,14 @@ function renderAdminControls() {
   logoutButton.textContent = "Se déconnecter";
   logoutButton.addEventListener("click", logoutAdmin);
 
-  adminControlsNode.replaceChildren(status, pendingIndicator, appointmentIndicator, createButton, logoutButton);
+  adminControlsNode.replaceChildren(
+    status,
+    pendingIndicator,
+    appointmentIndicator,
+    contactIndicator,
+    createButton,
+    logoutButton,
+  );
   updateViewerMenuOffset();
 }
 
@@ -908,18 +992,33 @@ function createHomeVideoSection() {
 
 function renderContactPanel() {
   gridNode.className = "contact-view";
-  panelNode.setAttribute("aria-label", "Contacter Audrey Fabre");
+  panelNode.setAttribute("aria-label", isAdminLoggedIn ? "Messages de contact" : "Contacter Audrey Fabre");
   metricsNode.replaceChildren();
 
   const section = document.createElement("section");
   section.className = "contact-content";
 
   const title = document.createElement("h2");
-  title.textContent = "Contacter Audrey Fabre";
+  title.textContent = isAdminLoggedIn ? "Messages de contact" : "Contacter Audrey Fabre";
 
   const intro = document.createElement("p");
   intro.className = "contact-introduction";
-  intro.textContent = "Utilisez ce formulaire pour envoyer un courriel à Audrey Fabre.";
+  intro.textContent = isAdminLoggedIn
+    ? "Messages envoyés depuis le formulaire de contact du site."
+    : "Utilisez ce formulaire pour envoyer un message à Audrey Fabre.";
+
+  section.append(title, intro);
+
+  if (isAdminLoggedIn) {
+    section.append(createContactAdminInbox());
+    gridNode.replaceChildren(section);
+    return;
+  }
+
+  const safetyNotice = document.createElement("p");
+  safetyNotice.className = "data-safety-notice";
+  safetyNotice.textContent =
+    "N'indiquez pas d'information médicale détaillée et n'envoyez pas de document confidentiel dans ce formulaire.";
 
   const form = document.createElement("form");
   form.className = "contact-form";
@@ -966,12 +1065,96 @@ function renderContactPanel() {
   const submit = document.createElement("button");
   submit.className = "admin-button admin-button-primary contact-submit";
   submit.type = "submit";
-  submit.textContent = "Envoyer le courriel";
+  submit.textContent = "Envoyer le message";
 
   form.append(nameField, emailField, subjectField, messageField, honeypotField, notice, submit);
   form.addEventListener("submit", handleContactSubmit);
-  section.append(title, intro, form);
+  section.append(safetyNotice, form);
   gridNode.replaceChildren(section);
+}
+
+function createContactAdminInbox() {
+  const inbox = document.createElement("section");
+  inbox.className = "contact-inbox";
+
+  const count = document.createElement("p");
+  count.className = "contact-inbox-count";
+  count.textContent = formatContactMessageCount(contactMessageState.length);
+  inbox.append(count);
+
+  if (contactMessageState.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "contact-inbox-empty";
+    empty.textContent = "Aucun message reçu pour le moment.";
+    inbox.append(empty);
+    return inbox;
+  }
+
+  const list = document.createElement("div");
+  list.className = "contact-message-list";
+  contactMessageState.forEach((message) => list.append(createContactMessageItem(message)));
+  inbox.append(list);
+  return inbox;
+}
+
+function createContactMessageItem(message) {
+  const item = document.createElement("article");
+  item.className = "contact-message-item";
+
+  const header = document.createElement("header");
+  const title = document.createElement("h3");
+  title.textContent = message.subject;
+  const delivery = document.createElement("span");
+  delivery.className = `contact-delivery-status is-${message.deliveryStatus}`;
+  delivery.textContent = message.deliveryStatus === "sent" ? "Courriel envoyé" : "Conservé sur le site";
+  header.append(title, delivery);
+
+  const author = document.createElement("p");
+  author.append(createStrongText(message.name));
+  if (message.email) {
+    author.append(document.createTextNode(` · ${message.email}`));
+  }
+
+  const date = document.createElement("p");
+  date.className = "contact-message-date";
+  date.textContent = message.createdAt ? formatDate(message.createdAt) : "Date non disponible";
+
+  const body = document.createElement("p");
+  body.className = "contact-message-body";
+  body.textContent = message.message;
+
+  const remove = document.createElement("button");
+  remove.className = "admin-button admin-danger-button";
+  remove.type = "button";
+  remove.textContent = "Supprimer ce message";
+  remove.addEventListener("click", () => deleteContactMessage(message.id, remove));
+
+  item.append(header, author, date, body, remove);
+  return item;
+}
+
+async function deleteContactMessage(messageId, control) {
+  if (!window.confirm("Supprimer définitivement ce message de contact ?")) {
+    return;
+  }
+
+  const stopLoading = startLoading("Suppression du message...");
+  const stopControlLoading = setControlLoading(control, "Suppression...");
+  try {
+    await apiRequest(`/api/contact/${encodeURIComponent(messageId)}`, { method: "DELETE", auth: true });
+    await loadBackendState({ silent: true });
+    renderAdminControls();
+    renderDisease();
+  } catch {
+    window.alert("Le message n'a pas pu être supprimé. Vérifiez la connexion puis réessayez.");
+  } finally {
+    stopControlLoading();
+    stopLoading();
+  }
+}
+
+function formatContactMessageCount(count) {
+  return `${count} ${count > 1 ? "messages reçus" : "message reçu"}`;
 }
 
 async function handleContactSubmit(event) {
@@ -984,7 +1167,7 @@ async function handleContactSubmit(event) {
   const message = String(formData.get("contactMessage") ?? "").trim();
   const website = String(formData.get("website") ?? "").trim();
   const notice = form.querySelector(".contact-notice");
-  const stopLoading = startLoading("Envoi du courriel...");
+  const stopLoading = startLoading("Envoi du message...");
   const stopSubmitLoading = setFormLoading(form, "Envoi...");
   notice.hidden = true;
 
@@ -993,20 +1176,22 @@ async function handleContactSubmit(event) {
       throw new Error("API unavailable");
     }
 
-    await apiRequest("/api/contact", {
+    const result = await apiRequest("/api/contact", {
       method: "POST",
       body: { name, email, subject, message, website },
     });
     form.reset();
     notice.className = "contact-notice is-success";
-    notice.textContent = "Votre courriel a bien été envoyé à Audrey Fabre.";
+    notice.textContent = result.sent
+      ? "Votre message a bien été envoyé à Audrey Fabre."
+      : "Votre message a bien été transmis à Audrey Fabre dans son espace de gestion du site.";
     notice.hidden = false;
     notice.focus({ preventScroll: true });
   } catch (error) {
     notice.className = "contact-notice is-error";
     notice.textContent = error.status === 429
       ? "Trop de messages ont été envoyés récemment. Veuillez réessayer dans quelques minutes."
-      : "Le courriel n'a pas pu être envoyé. Vérifiez votre connexion puis réessayez.";
+      : "Le message n'a pas pu être envoyé. Vérifiez votre connexion puis réessayez.";
     notice.hidden = false;
     notice.focus({ preventScroll: true });
   } finally {
@@ -1349,7 +1534,7 @@ function createAppointmentRequestsPanel() {
     panel.append(list);
   }
 
-  const approvedRequests = getApprovedAppointmentRequests().slice(0, 4);
+  const approvedRequests = getApprovedAppointmentRequests();
   if (approvedRequests.length > 0) {
     const approvedTitle = document.createElement("h3");
     approvedTitle.textContent = "Rendez-vous validés";
@@ -1360,13 +1545,28 @@ function createAppointmentRequestsPanel() {
     panel.append(approvedTitle, approvedList);
   }
 
+  const declinedRequests = getDeclinedAppointmentRequests();
+  if (declinedRequests.length > 0) {
+    const declinedTitle = document.createElement("h3");
+    declinedTitle.textContent = "Demandes refusées";
+
+    const declinedList = document.createElement("div");
+    declinedList.className = "appointment-request-list";
+    declinedRequests.forEach((request) => declinedList.append(createAppointmentRequestItem(request)));
+    panel.append(declinedTitle, declinedList);
+  }
+
   return panel;
 }
 
 function createAppointmentRequestItem(request) {
   const slot = getAppointmentSlotById(request.slotId);
+  const isPastRequest = Boolean(slot && !isFutureSlot(slot));
   const article = document.createElement("article");
   article.className = `appointment-request-item appointment-request-${request.status}`;
+  if (isPastRequest) {
+    article.classList.add("is-past-request");
+  }
 
   const title = document.createElement("h4");
   title.textContent = slot ? getSlotLabel(slot) : "Créneau supprimé";
@@ -1383,7 +1583,13 @@ function createAppointmentRequestItem(request) {
 
   const status = document.createElement("p");
   status.className = "appointment-request-status";
-  status.textContent = request.status === "approved" ? "Validé" : "En attente";
+  status.textContent = request.status === "approved"
+    ? "Validé"
+    : request.status === "declined"
+      ? "Refusé"
+      : isPastRequest
+        ? "En attente · créneau passé"
+        : "En attente";
 
   article.append(title, patient, contact, reason, status);
 
@@ -1391,15 +1597,18 @@ function createAppointmentRequestItem(request) {
     article.append(createAppointmentAttachmentList(request.attachments));
   }
 
-  if (request.status === "pending") {
-    const actions = document.createElement("div");
-    actions.className = "appointment-actions";
+  const actions = document.createElement("div");
+  actions.className = "appointment-actions";
 
-    const approve = document.createElement("button");
-    approve.className = "admin-button admin-button-primary";
-    approve.type = "button";
-    approve.textContent = "Valider";
-    approve.addEventListener("click", () => approveAppointmentRequest(request.id, approve));
+  if (request.status === "pending") {
+    if (!isPastRequest) {
+      const approve = document.createElement("button");
+      approve.className = "admin-button admin-button-primary";
+      approve.type = "button";
+      approve.textContent = "Valider";
+      approve.addEventListener("click", () => approveAppointmentRequest(request.id, approve));
+      actions.append(approve);
+    }
 
     const decline = document.createElement("button");
     decline.className = "admin-button";
@@ -1407,9 +1616,16 @@ function createAppointmentRequestItem(request) {
     decline.textContent = "Refuser";
     decline.addEventListener("click", () => declineAppointmentRequest(request.id, decline));
 
-    actions.append(approve, decline);
-    article.append(actions);
+    actions.append(decline);
   }
+
+  const remove = document.createElement("button");
+  remove.className = "admin-button admin-danger-button";
+  remove.type = "button";
+  remove.textContent = "Supprimer la demande";
+  remove.addEventListener("click", () => deleteAppointmentRequest(request.id, remove));
+  actions.append(remove);
+  article.append(actions);
 
   return article;
 }
@@ -1434,6 +1650,15 @@ function createAppointmentAttachmentList(attachments) {
 }
 
 function createAppointmentAttachmentLink(attachment) {
+  if (attachment.storage === "private-server") {
+    const button = document.createElement("button");
+    button.className = "appointment-attachment-button";
+    button.type = "button";
+    button.textContent = `Télécharger ${attachment.label || "la pièce jointe"}`;
+    button.addEventListener("click", () => downloadPrivateAppointmentAttachment(attachment, button));
+    return button;
+  }
+
   const link = document.createElement("a");
   link.href = attachment.url;
   link.textContent = attachment.label || "Pièce jointe";
@@ -1446,6 +1671,27 @@ function createAppointmentAttachmentLink(attachment) {
   }
 
   return link;
+}
+
+async function downloadPrivateAppointmentAttachment(attachment, control) {
+  const stopLoading = startLoading("Téléchargement de la pièce jointe...");
+  const stopControlLoading = setControlLoading(control, "Téléchargement...");
+  try {
+    const response = await apiRequestRaw(attachment.url, { auth: true });
+    const objectUrl = URL.createObjectURL(await response.blob());
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = attachment.label || "piece-jointe";
+    document.body.append(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+  } catch {
+    window.alert("La pièce jointe n'a pas pu être téléchargée. Reconnectez-vous puis réessayez.");
+  } finally {
+    stopControlLoading();
+    stopLoading();
+  }
 }
 
 function createAvailabilityManager() {
@@ -1704,6 +1950,11 @@ function openAppointmentRequestDialog(slotId) {
   intro.className = "admin-help";
   intro.textContent = `Demande pour le ${getSlotLabel(slot)}. Audrey Fabre devra valider ce rendez-vous.`;
 
+  const safetyNotice = document.createElement("p");
+  safetyNotice.className = "data-safety-notice";
+  safetyNotice.textContent =
+    "Ne joignez pas de compte rendu médical, d'ordonnance, de pièce d'identité ou d'autre document confidentiel.";
+
   const name = createFieldLabel("Nom", "input", {
     type: "text",
     name: "patientName",
@@ -1732,7 +1983,7 @@ function openAppointmentRequestDialog(slotId) {
   const attachments = createFieldLabel("Pièces jointes", "input", {
     type: "file",
     name: "appointmentFiles",
-    accept: "image/*,application/pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt",
+    accept: ".png,.jpg,.jpeg,.webp,.gif,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt",
     multiple: "true",
   });
 
@@ -1747,7 +1998,7 @@ function openAppointmentRequestDialog(slotId) {
   error.hidden = true;
 
   const actions = createAdminFormActions("Envoyer la demande");
-  form.append(intro, name, phone, email, reason, attachments, attachmentsHelp, error, actions);
+  form.append(intro, safetyNotice, name, phone, email, reason, attachments, attachmentsHelp, error, actions);
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -1782,6 +2033,12 @@ function openAppointmentRequestDialog(slotId) {
     if (getFilesTotalSize(files) > maxLocalAttachmentBytes) {
       error.hidden = false;
       error.textContent = "Les pièces jointes sont trop lourdes. Total maximum : 3 Mo.";
+      return;
+    }
+
+    if (files.some((file) => !supportedUploadTypes.has(getFileKind(file)))) {
+      error.hidden = false;
+      error.textContent = "Une pièce jointe utilise un format non pris en charge.";
       return;
     }
 
@@ -1963,12 +2220,13 @@ function normalizeAttachmentRecord(attachment) {
     return null;
   }
 
+  const allowedStorage = new Set(["browser", "server", "private-server"]);
   return {
     label: String(attachment.label ?? "").trim() || "Pièce jointe",
     url: String(attachment.url),
     kind: String(attachment.kind ?? ""),
     local: Boolean(attachment.local),
-    storage: attachment.storage === "browser" ? "browser" : "",
+    storage: allowedStorage.has(attachment.storage) ? attachment.storage : "",
     size: Number(attachment.size ?? 0),
   };
 }
@@ -2029,10 +2287,12 @@ function getPendingAppointmentRequests() {
 function getApprovedAppointmentRequests() {
   return appointmentState.requests
     .filter((request) => request.status === "approved")
-    .filter((request) => {
-      const slot = getAppointmentSlotById(request.slotId);
-      return slot ? isFutureSlot(slot) : true;
-    })
+    .sort(compareAppointmentRequests);
+}
+
+function getDeclinedAppointmentRequests() {
+  return appointmentState.requests
+    .filter((request) => request.status === "declined")
     .sort(compareAppointmentRequests);
 }
 
@@ -2097,6 +2357,13 @@ async function approveAppointmentRequest(requestId, control = null) {
     return;
   }
 
+  const slot = getAppointmentSlotById(request.slotId);
+  if (!slot || !isFutureSlot(slot)) {
+    appointmentNotice = "Un rendez-vous dont le créneau est passé ne peut pas être validé.";
+    renderDisease();
+    return;
+  }
+
   const stopLoading = startLoading("Validation du rendez-vous...");
   const stopControlLoading = setControlLoading(control, "Validation...");
   const previousState = cloneJson(appointmentState);
@@ -2146,6 +2413,39 @@ async function declineAppointmentRequest(requestId, control = null) {
   renderDisease();
   stopControlLoading();
   stopLoading();
+}
+
+async function deleteAppointmentRequest(requestId, control = null) {
+  const request = appointmentState.requests.find((item) => item.id === requestId);
+  if (!request || !window.confirm("Supprimer définitivement cette demande de rendez-vous et ses pièces jointes ?")) {
+    return;
+  }
+
+  const stopLoading = startLoading("Suppression de la demande...");
+  const stopControlLoading = setControlLoading(control, "Suppression...");
+  const previousState = cloneJson(appointmentState);
+  appointmentState.requests = appointmentState.requests.filter((item) => item.id !== requestId);
+
+  try {
+    if (apiEnabled) {
+      await apiRequest(`/api/appointments/requests/${encodeURIComponent(requestId)}`, {
+        method: "DELETE",
+        auth: true,
+      });
+      await loadBackendState({ silent: true });
+    } else {
+      saveAppointmentState();
+    }
+    appointmentNotice = "La demande de rendez-vous a été supprimée.";
+  } catch {
+    appointmentState = previousState;
+    appointmentNotice = "La demande n'a pas pu être supprimée.";
+  } finally {
+    renderAdminControls();
+    renderDisease();
+    stopControlLoading();
+    stopLoading();
+  }
 }
 
 async function toggleAppointmentSlot(slotId, control = null) {
@@ -2296,33 +2596,32 @@ function openLoginDialog() {
     const stopSubmitLoading = setFormLoading(form, "Connexion...");
 
     try {
-      if (apiEnabled) {
-        try {
-          const session = await apiRequest("/api/auth/login", {
-            method: "POST",
-            body: { login, password },
-          });
-          adminAuthToken = session.token || "";
-          sessionStorage.setItem(authStorageKey, adminAuthToken);
-          const loaded = await loadBackendState({ silent: true });
-          if (!loaded || !adminAuthToken) {
-            throw new Error("Session invalide");
-          }
-        } catch {
-          error.hidden = false;
-          error.textContent = "Identifiant ou mot de passe incorrect.";
-          return;
-        }
-      } else if (login !== adminLogin || !(await verifyLocalAdminPassword(password))) {
+      if (!apiEnabled) {
         error.hidden = false;
-        error.textContent = "Identifiant ou mot de passe incorrect.";
+        error.textContent = "Le service de connexion est indisponible.";
+        return;
+      }
+
+      try {
+        const session = await apiRequest("/api/auth/login", {
+          method: "POST",
+          body: { login, password },
+        });
+        adminAuthToken = session.token || "";
+        sessionStorage.setItem(authStorageKey, adminAuthToken);
+        const loaded = await loadBackendState({ silent: true });
+        if (!loaded || !adminAuthToken) {
+          throw new Error("Session invalide");
+        }
+      } catch (loginError) {
+        error.hidden = false;
+        error.textContent = loginError.status === 429
+          ? "Trop de tentatives. Attendez quelques minutes avant de réessayer."
+          : "Identifiant ou mot de passe incorrect.";
         return;
       }
 
       isAdminLoggedIn = true;
-      if (!apiEnabled) {
-        sessionStorage.setItem(authStorageKey, "true");
-      }
       resetViewAfterSessionChange();
     } finally {
       stopSubmitLoading();
@@ -2339,6 +2638,7 @@ function logoutAdmin() {
   if (apiEnabled) {
     questionnaireResponseState = {};
   }
+  contactMessageState = [];
   sessionStorage.removeItem(authStorageKey);
   resetViewAfterSessionChange();
 }
@@ -2761,7 +3061,7 @@ function createAttachmentFields(resource, options = {}) {
   const fileLabel = createFieldLabel("Fichier", "input", {
     type: "file",
     name: "attachmentFile",
-    accept: "image/*,application/pdf,video/*,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt",
+    accept: ".png,.jpg,.jpeg,.webp,.gif,.pdf,.mp4,.webm,.mov,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt",
   });
   fileLabel.classList.add("attachment-file-field");
 
@@ -2823,7 +3123,7 @@ function createIllustrationFields(resource, options = {}) {
   const fileLabel = createFieldLabel("Image", "input", {
     type: "file",
     name: "illustrationFile",
-    accept: "image/*",
+    accept: ".png,.jpg,.jpeg,.webp,.gif",
   });
   fileLabel.classList.add("illustration-file-field");
 
@@ -2929,8 +3229,15 @@ async function readResourceForm(form, originalResource, options = {}) {
       return { ok: false, message: "Choisissez un fichier ou sélectionnez une autre action." };
     }
 
+    if (!supportedUploadTypes.has(getFileKind(attachmentFile))) {
+      return {
+        ok: false,
+        message: "Format non pris en charge. Utilisez une image, un PDF, une vidéo, un document Office ou un fichier texte.",
+      };
+    }
+
     if (attachmentFile.size > maxLocalAttachmentBytes) {
-      return { ok: false, message: "Ce fichier est trop lourd pour la maquette locale. Taille maximale : 3 Mo." };
+      return { ok: false, message: "Ce fichier est trop lourd. Taille maximale : 3 Mo." };
     }
   }
 
@@ -2944,11 +3251,11 @@ async function readResourceForm(form, originalResource, options = {}) {
     }
 
     if (!isImageFile(illustrationFile)) {
-      return { ok: false, message: "L'illustration doit être une image." };
+      return { ok: false, message: "L'illustration doit être une image PNG, JPEG, WebP ou GIF." };
     }
 
     if (illustrationFile.size > maxLocalAttachmentBytes) {
-      return { ok: false, message: "Cette image est trop lourde pour la maquette locale. Taille maximale : 3 Mo." };
+      return { ok: false, message: "Cette image est trop lourde. Taille maximale : 3 Mo." };
     }
   }
 
@@ -2969,8 +3276,13 @@ async function readResourceForm(form, originalResource, options = {}) {
       illustrationFile,
       title,
     );
-  } catch {
-    return { ok: false, message: "Le fichier n'a pas pu être lu. Essayez un autre fichier ou ajoutez un lien." };
+  } catch (error) {
+    return {
+      ok: false,
+      message: error?.status === 413
+        ? "Le fichier est trop lourd. Taille maximale : 3 Mo."
+        : "Le fichier n'a pas pu être enregistré. Vérifiez la connexion, essayez un autre fichier ou ajoutez un lien.",
+    };
   }
 
   return {
@@ -3057,6 +3369,10 @@ async function buildEditedAttachment(originalResource, mode, url, file, title) {
   }
 
   if (mode === "replace-file" && file instanceof File && file.name) {
+    if (apiEnabled) {
+      return uploadResourceFile(file);
+    }
+
     const dataUrl = await readFileAsDataUrl(file);
     return {
       label: file.name,
@@ -3086,6 +3402,10 @@ async function buildEditedIllustration(originalResource, mode, url, file, title)
   }
 
   if (mode === "replace-file" && file instanceof File && file.name) {
+    if (apiEnabled) {
+      return uploadResourceFile(file);
+    }
+
     const dataUrl = await readFileAsDataUrl(file);
     return {
       label: file.name,
@@ -3106,6 +3426,25 @@ async function buildEditedIllustration(originalResource, mode, url, file, title)
   };
 }
 
+async function uploadResourceFile(file) {
+  const dataUrl = await readFileAsDataUrl(file);
+  const result = await apiRequest("/api/files", {
+    method: "POST",
+    auth: true,
+    body: {
+      filename: file.name,
+      contentType: getFileKind(file),
+      dataUrl,
+    },
+  });
+
+  if (!result?.file?.url) {
+    throw new Error("Réponse de téléversement invalide");
+  }
+
+  return result.file;
+}
+
 function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -3120,7 +3459,7 @@ function getFileKind(file) {
 }
 
 function isImageFile(file) {
-  return getFileKind(file).startsWith("image/");
+  return supportedIllustrationTypes.has(getFileKind(file));
 }
 
 function getAttachmentKindFromUrl(url) {
@@ -3155,7 +3494,7 @@ function getMimeTypeFromName(name) {
 }
 
 function getAttachmentDisplayName(attachment) {
-  if (attachment.storage === "browser") {
+  if (attachment.storage === "browser" || attachment.storage === "server") {
     return attachment.label || "fichier importé";
   }
 
@@ -3166,6 +3505,7 @@ async function saveResourceFromEditor(originalId, editedResource, options = {}) 
   const { isNew = false } = options;
   const shouldHide = Boolean(editedResource.isHidden);
   const previousState = cloneJson(editableResourceState);
+  const previousResource = resourcesById[originalId] || null;
 
   if (isNew) {
     editableResourceState.created.push(editedResource);
@@ -3187,8 +3527,10 @@ async function saveResourceFromEditor(originalId, editedResource, options = {}) 
         body: { resourceState: editableResourceState },
       });
       await loadBackendState({ silent: true });
+      await cleanupUnreferencedServerFiles(previousResource, editedResource);
     } catch (error) {
       editableResourceState = previousState;
+      await cleanupUnreferencedServerFiles(editedResource, previousResource).catch(() => null);
       throw error;
     }
   } else {
@@ -3239,6 +3581,7 @@ async function requestDeleteResource(resourceId, control = null) {
 }
 
 async function deleteResource(resourceId) {
+  const deletedResource = resourcesById[resourceId] || null;
   const isBaseResource = baseResources.some((resource) => resource.id === resourceId);
   const previousState = cloneJson(editableResourceState);
 
@@ -3271,6 +3614,7 @@ async function deleteResource(resourceId) {
         auth: true,
       }).catch(() => null);
       await loadBackendState({ silent: true });
+      await cleanupUnreferencedServerFiles(deletedResource, null);
     } catch (error) {
       editableResourceState = previousState;
       throw error;
@@ -3290,6 +3634,49 @@ async function deleteResource(resourceId) {
   }
 
   renderDisease();
+}
+
+async function cleanupUnreferencedServerFiles(sourceResource, keptResource) {
+  if (!apiEnabled || !sourceResource) {
+    return;
+  }
+
+  const sourceIds = getResourceServerFileIds(sourceResource);
+  const keptIds = getResourceServerFileIds(keptResource);
+  const obsoleteIds = [...sourceIds].filter((fileId) => !keptIds.has(fileId));
+
+  await Promise.all(
+    obsoleteIds.map((fileId) =>
+      apiRequest(`/api/files/${encodeURIComponent(fileId)}`, {
+        method: "DELETE",
+        auth: true,
+      }).catch(() => null),
+    ),
+  );
+}
+
+function getResourceServerFileIds(resource) {
+  const ids = new Set();
+  [resource?.attachment, resource?.illustration].forEach((attachment) => {
+    if (attachment?.storage !== "server" || !attachment.url) {
+      return;
+    }
+
+    try {
+      const apiUrl = new URL(apiBaseUrl);
+      const fileUrl = new URL(attachment.url);
+      const prefix = `${apiUrl.pathname.replace(/\/$/, "")}/api/files/`.replace(/\/+/g, "/");
+      if (fileUrl.origin === apiUrl.origin && fileUrl.pathname.startsWith(prefix)) {
+        const fileId = fileUrl.pathname.slice(prefix.length).split("/")[0];
+        if (/^[0-9a-f-]{36}$/i.test(fileId)) {
+          ids.add(fileId);
+        }
+      }
+    } catch {
+      // Ignore links that are not files managed by this API.
+    }
+  });
+  return ids;
 }
 
 function extractEditableResourceFields(resource) {
@@ -4677,7 +5064,7 @@ function printResourceDocument(resource, control) {
     printWindow.addEventListener("afterprint", cleanUp, { once: true });
     printWindow.focus();
     printWindow.print();
-    window.setTimeout(cleanUp, 60000);
+    window.setTimeout(cleanUp, 5000);
   }, { once: true });
 }
 
@@ -5304,7 +5691,8 @@ function closeResourceModal(options = {}) {
 function trapFocus(event, root, options = {}) {
   const { includeTabs = false } = options;
   const focusable = [
-    ...(includeTabs ? tabsNode.querySelectorAll(focusableSelector) : []),
+    ...(includeTabs ? headerNode.querySelectorAll(focusableSelector) : []),
+    ...(includeTabs ? menuNode.querySelectorAll(focusableSelector) : []),
     ...root.querySelectorAll(focusableSelector),
   ].filter((node) => node instanceof HTMLElement && node.offsetParent !== null);
 

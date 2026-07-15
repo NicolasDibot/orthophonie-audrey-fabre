@@ -15,5 +15,11 @@ services:
         generateValue: true
       - key: CORS_ORIGINS
         value: https://nicolasdibot.github.io
+      - key: PUBLIC_BASE_URL
+        value: https://orthophonie-audrey-api.onrender.com
+      - key: APPOINTMENT_TIMEZONE
+        value: Europe/Paris
+      - key: ENABLE_API_DOCS
+        value: "false"
       - key: DATABASE_URL
         sync: false
