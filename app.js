@@ -51,6 +51,7 @@ const resourceSections = [
   "Les fonctions cognitives : que sont-elles ?",
   "Les fonctions cognitives dans la maladie de Huntington",
   "Les outils pour travailler les fonctions cognitives à la maison",
+  "Voix et parole",
   "La déglutition",
   "Autres ressources",
   "Votre section, vos expériences, vos partages",
@@ -560,6 +561,7 @@ function normalizeEditableResource(resource) {
 function getTagClassForSection(section) {
   const normalized = normalizeText(section);
 
+  if (normalized.includes("voix") || normalized.includes("parole")) return "voix";
   if (normalized.includes("fonctions cognitives :")) return "cognition";
   if (normalized.includes("maladie de huntington")) return "huntington";
   if (normalized.includes("outils")) return "quotidien";
@@ -573,6 +575,7 @@ function getTagClassForSection(section) {
 function getCategoryForSection(section) {
   const normalized = normalizeText(section);
 
+  if (normalized.includes("voix") || normalized.includes("parole")) return "Voix et parole";
   if (normalized.includes("cognitives")) return "Cognition";
   if (normalized.includes("huntington")) return "Huntington";
   if (normalized.includes("outils")) return "Outils";
