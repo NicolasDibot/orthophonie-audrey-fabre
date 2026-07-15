@@ -2606,23 +2606,24 @@ body.modal-open .modal-shell {
 }
 
 .resource-theme-list .resource-card {
-  height: auto;
-  min-height: 300px;
-  overflow: visible;
+  height: 200px;
+  min-height: 200px;
+  overflow: hidden;
   background: #fff;
 }
 
 .resource-theme-list .resource-main {
   display: grid;
   grid-template-columns: minmax(230px, 32%) minmax(0, 1fr);
-  gap: clamp(18px, 2.2vw, 32px);
-  min-height: 300px;
-  height: auto;
-  padding: 18px;
+  gap: clamp(14px, 1.8vw, 24px);
+  min-height: 0;
+  height: 100%;
+  padding: 12px;
 }
 
 .resource-card-content {
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
@@ -2632,33 +2633,39 @@ body.modal-open .modal-shell {
 .resource-theme-list .resource-card.has-generated-preview .resource-media {
   width: 100%;
   height: 100%;
-  min-height: 260px;
+  min-height: 0;
   margin: 0;
 }
 
 .resource-theme-list .resource-media img {
   width: 100%;
   height: 100%;
-  min-height: 260px;
-  max-height: 340px;
+  min-height: 0;
+  max-height: none;
   object-fit: contain;
 }
 
 .resource-theme-list .resource-card h3 {
   font-size: clamp(1.55rem, 2vw, 2rem);
-  -webkit-line-clamp: unset;
+  -webkit-line-clamp: 2;
 }
 
-.resource-theme-list .tag {
-  -webkit-line-clamp: unset;
+.resource-theme-list .resource-topline {
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.resource-theme-list .tag,
+.resource-theme-list .questionnaire-format-badge {
+  display: none;
 }
 
 .resource-theme-list .resource-summary,
 .resource-theme-list .resource-card.has-visual .resource-summary {
-  margin-bottom: 20px;
+  margin-bottom: 8px;
   font-size: clamp(1.2rem, 1.5vw, 1.45rem);
-  line-height: 1.5;
-  -webkit-line-clamp: 5;
+  line-height: 1.35;
+  -webkit-line-clamp: 2;
 }
 
 .theme-editor-fields {
@@ -2683,10 +2690,28 @@ body.modal-open .modal-shell {
     padding: 10px;
   }
 
+  .resource-theme-list .resource-card {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+  }
+
   .resource-theme-list .resource-main {
     grid-template-columns: 1fr;
     min-height: 0;
     padding: 14px;
+  }
+
+  .resource-theme-list .tag,
+  .resource-theme-list .questionnaire-format-badge {
+    display: -webkit-box;
+  }
+
+  .resource-theme-list .resource-summary,
+  .resource-theme-list .resource-card.has-visual .resource-summary {
+    margin-bottom: 20px;
+    line-height: 1.5;
+    -webkit-line-clamp: unset;
   }
 
   .resource-theme-list .resource-media,
