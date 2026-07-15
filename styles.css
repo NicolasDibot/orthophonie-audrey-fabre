@@ -1632,13 +1632,6 @@ body.modal-open .header-copy {
   font-size: clamp(1.9rem, 3vw, 3rem);
 }
 
-.home-video-timing {
-  margin: 10px 0 20px;
-  color: #435159;
-  font-size: clamp(1.1rem, 1.5vw, 1.35rem);
-  font-weight: 750;
-}
-
 .home-video-player {
   display: block;
   width: 100%;
